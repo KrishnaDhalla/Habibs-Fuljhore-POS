@@ -1,0 +1,238 @@
+erDiagram
+  customers ||--o{ bills : "pays"
+  customers ||--o{ loyalty_points : "points"
+  bills |o--o{ loyalty_points : "earned, used"
+  bills ||--|{ bill_items : "has"
+  bills ||--o{ bill_payments : "paid by"
+  bills ||--o{ wa_messages : "sent on WhatsApp"
+  bookings |o--o{ wa_messages : "reminder"
+  payslips |o--o{ wa_messages : "salary slip"
+  customers |o--o{ wa_messages : "we miss you"
+  bills ||--o| feedback : "how was your visit"
+  services ||--o{ bill_items : "billed as"
+  products ||--o{ bill_items : "sold as"
+  offers |o--o{ bill_items : "applied on"
+  staff |o--o{ bill_items : "did, earns commission"
+  staff |o--o{ bills : "own bill (staff price)"
+  bills ||--o{ wa_messages : "sent on WhatsApp"
+  products ||--o{ stock_moves : "every change"
+  bills |o--o{ stock_moves : "sale or return"
+  staff |o--o{ stock_moves : "took out"
+  owner_grants |o--o{ stock_moves : "approved"
+  services ||--o{ service_usage : "uses (Used in)"
+  products ||--o{ service_usage : "used in"
+  stock_moves ||--o| unit_ends : "ended"
+  stock_moves |o--o{ unit_ends : "ended by the next"
+  services ||--o{ free_uses : "done without a bill"
+  stock_moves ||--o{ unit_checks : "weekly check"
+  staff |o--o{ free_uses : "did"
+  staff ||--o{ attendance : "day"
+  staff ||--o{ staff_advances : "gets"
+  staff ||--o{ payslips : "month"
+
+  customers {
+    uuid id PK
+    text phone UK
+    text name
+    text gender
+    date birthday
+    text source
+    bool whatsapp_ok
+    int points "balance, kept by loyalty_points"
+    int visits
+    numeric total_spent
+    timestamptz last_visit
+  }
+  bills {
+    uuid id PK
+    text bill_no UK "HF2627-0001"
+    timestamptz created_at
+    uuid customer_id FK
+    bool is_new_customer
+    numeric subtotal
+    numeric discount
+    numeric taxable
+    numeric cgst
+    numeric sgst
+    numeric total
+    text pay_mode
+    numeric paid_points "paid with points"
+    int points_earned
+    uuid for_staff FK "staff's own bill"
+    text status "paid cancelled"
+  }
+  bill_items {
+    uuid id PK
+    uuid bill_id FK
+    text item_type "service product"
+    uuid service_id FK
+    uuid product_id FK
+    uuid staff_id FK
+    uuid offer_id FK
+    text name "copied"
+    text category "copied"
+    numeric qty
+    numeric unit_price
+    numeric line_discount "this item only"
+    numeric staff_discount "staff's own service"
+    numeric discount
+    numeric taxable
+    numeric commission_base "full price for staff"
+    numeric gst
+  }
+  services {
+    uuid id PK
+    text name
+  }
+  offers {
+    uuid id PK
+    text name
+  }
+  staff {
+    uuid id PK
+    text name
+    text phone
+    numeric monthly_salary
+    numeric service_commission_pct
+    numeric product_commission_pct
+    date join_date
+    date leave_date
+  }
+  attendance {
+    uuid staff_id FK
+    date day
+    text status "P H A W L"
+  }
+  staff_advances {
+    uuid staff_id FK
+    date day
+    numeric amount
+  }
+  payslips {
+    uuid staff_id FK
+    text month
+    numeric net_pay
+  }
+  products {
+    uuid id PK
+    text name
+    text kind "retail salon"
+    text unit
+    numeric stock "from stock_moves"
+    numeric low_stock
+    numeric mrp
+    numeric supplier_discount_pct
+    numeric cost_price
+    numeric sell_price
+    text use_type
+    numeric size
+    text note
+    numeric uses_per_unit "lasts about"
+    timestamptz finished_at "to buy"
+  }
+  stock_moves {
+    uuid id PK
+    uuid product_id FK
+    text type "in use sale adjust return"
+    numeric qty
+    numeric unit_cost
+    uuid staff_id FK
+    bool empty_returned
+    uuid bill_id FK
+    uuid owner_grant_id FK
+    numeric unit_size "pack size, if not usual"
+  }
+  service_usage {
+    uuid service_id FK
+    uuid product_id FK
+    numeric weight "counts as"
+  }
+  unit_ends {
+    uuid move_id PK "the give-out"
+    uuid product_id FK
+    timestamptz ended_at
+    text how "empty no_empty finished"
+    uuid by_move FK "next give-out"
+  }
+  unit_checks {
+    uuid id PK
+    uuid move_id FK "the one in use"
+    numeric left_pct "100 full, 50 half"
+    numeric uses_at "bills showed"
+    numeric expected_at "should have"
+  }
+  free_uses {
+    uuid id PK
+    uuid service_id FK
+    text option_label
+    text extra_label
+    uuid staff_id FK
+    text reason "redo staff family training other"
+    text note
+  }
+  owner_grants {
+    uuid id PK
+    text action
+  }
+  wa_messages {
+    uuid id PK
+    uuid bill_id FK
+    uuid payslip_id FK
+    text phone
+    text status "sending sent delivered read failed"
+    text wamid UK "WhatsApp's id"
+    text error "why not sent"
+  }
+  loyalty_points {
+    uuid customer_id FK
+    uuid bill_id FK
+    text kind "earn use cancel expire"
+    int points
+  }
+  bill_payments {
+    uuid bill_id FK
+    text mode "cash upi card points, later wallet voucher"
+    numeric amount
+    text ref
+  }
+  bookings {
+    uuid id PK
+    timestamptz slot_at
+    timestamptz reminded_at
+  }
+  wa_messages {
+    uuid id PK
+    uuid bill_id FK
+    uuid payslip_id FK
+    uuid booking_id FK
+    uuid customer_id FK
+    text kind "bill feedback reminder winback"
+    text status "sending sent delivered read failed"
+    text dedupe UK "each goes once"
+    text wamid UK
+  }
+  feedback {
+    uuid bill_id FK
+    text rating "good ok bad"
+    text comment
+    timestamptz handled_at "owner dealt with it"
+  }
+  expenses {
+    uuid id PK
+    date day
+    numeric amount
+    text category
+    text paid_from "cash upi bank owner"
+    timestamptz cancelled_at
+  }
+  cash_closes {
+    date day UK
+    numeric opening_cash
+    numeric cash_sales
+    numeric cash_expenses
+    numeric expected
+    numeric counted
+    numeric difference "minus = short"
+    numeric taken_out
+    numeric closing_cash "tomorrow's opening"
+  }

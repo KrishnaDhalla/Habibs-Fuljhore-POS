@@ -1,0 +1,38 @@
+# Daily backup of the Supabase database (the free Supabase plan has no backups).
+# Setup: GitHub repo → Settings → Secrets and variables → Actions → New repository secret
+#   Name:  SUPABASE_DB_URL
+#   Value: Supabase → Connect → "Session pooler" connection string, with your database password filled in
+# Each run keeps a .dump file for 30 days under the repo's Actions tab → the run → Artifacts.
+# Restore with: pg_restore --clean --no-owner -d "<connection string>" habibs-YYYY-MM-DD.dump
+name: Daily database backup
+
+on:
+  schedule:
+    - cron: '30 21 * * *'   # 21:30 UTC = 3:00 AM in India
+  workflow_dispatch:         # lets you run it by hand from the Actions tab
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Dump the database
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          mkdir -p backups
+          /usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" --schema=public --no-owner --no-privileges -Fc -f "backups/habibs-$(date +%F).dump"
+          ls -lh backups
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: habibs-db-${{ github.run_number }}
+          path: backups/
+          retention-days: 30

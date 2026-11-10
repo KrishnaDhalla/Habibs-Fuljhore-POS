@@ -1,0 +1,71 @@
+erDiagram
+  staff ||--o{ attendance : "day: P H A W L"
+  staff ||--o| staff_faces : "face print"
+  staff ||--o{ check_ins : "one a day"
+  staff ||--o{ leave_requests : "asks"
+  leave_requests |o--o{ attendance : "approved days become L"
+  check_ins |o--o| attendance : "check-in makes P"
+  staff ||--o{ staff_documents : "Aadhaar, PAN..."
+  staff ||--o{ staff_advances : "gets"
+  staff ||--o{ payslips : "month"
+
+  staff {
+    uuid id PK
+    text name
+    text phone
+    numeric monthly_salary
+    date join_date
+    date leave_date
+    bool active
+  }
+  attendance {
+    uuid staff_id FK
+    date day
+    text status "P H A W L"
+    text marked_by "face check-in, leave approved, owner"
+  }
+  staff_faces {
+    uuid staff_id PK
+    jsonb descriptors "1 to 10 looks of 128 numbers"
+    text photo "small, from set-up"
+    timestamptz consent_at "they agreed"
+  }
+  check_ins {
+    uuid staff_id FK
+    date day "unique with staff"
+    timestamptz in_at
+    timestamptz out_at
+    text in_photo "about 160 px"
+    numeric in_distance "how close the face was"
+  }
+  leave_requests {
+    uuid id PK
+    uuid staff_id FK
+    date from_day
+    date to_day
+    text kind "planned sick=medical personal other"
+    text status "pending approved rejected cancelled"
+    text decided_by
+  }
+  staff_documents {
+    uuid id PK
+    uuid staff_id FK
+    text kind "aadhaar pan photo bank address certificate agreement other"
+    text number "Aadhaar: last 4 only"
+    text file_path "private storage staff-docs"
+  }
+  staff_advances {
+    uuid staff_id FK
+    date day
+    numeric amount
+  }
+  payslips {
+    uuid staff_id FK
+    text month
+    numeric week_off_days
+    numeric leave_days
+    numeric unpaid_off_days
+    numeric offs_not_taken "paid"
+    numeric day_rate "salary / (days - 4)"
+    numeric net_pay
+  }

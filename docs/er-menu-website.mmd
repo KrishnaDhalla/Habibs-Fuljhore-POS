@@ -1,0 +1,142 @@
+erDiagram
+  service_categories ||--o{ services : "has"
+  services ||--o{ booking_items : "booked as"
+  bookings ||--|{ booking_items : "has"
+  customers |o--o{ bookings : "phone"
+  bookings }o--o| bills : "came and paid"
+  offers |o--o{ bookings : "booked with"
+  customers |o--o{ enquiries : "phone"
+  enquiries |o--o| bookings : "became"
+  staff |o--o{ bookings : "stylist"
+  services ||--o{ service_changes : "history"
+  service_categories ||--o{ service_changes : "history"
+  owner_grants |o--o{ service_changes : "approved"
+  services ||--o{ bill_items : "billed as"
+  bills ||--|{ bill_items : "has"
+
+  service_categories {
+    uuid id PK
+    text name UK "on bills, offers, reports"
+    text slug UK "website id, never changes"
+    text section "billing tab: Hair Colour Facials ..."
+    int sort
+    text web_page "hair beauty nails makeup bridal groom"
+    text web_tab "Spa and Treatments"
+    text web_type "filter on Services page"
+    text description
+    text note "small print"
+    text image
+    bool consult_only "Book consultation"
+    bool show_on_website
+  }
+  services {
+    uuid id PK
+    uuid category_id FK
+    text name "on the bill"
+    text slug UK "website id"
+    numeric price "cheapest option"
+    jsonb variants "S M L options"
+    bool open_price "from or onwards"
+    numeric gst_pct
+    text sac
+    bool active "in billing"
+    text web_name "Full Legs"
+    text subtitle
+    text_array includes
+    text description
+    int duration_min
+    text for_gender
+    bool show_on_website
+    bool book_online
+  }
+  service_changes {
+    uuid id PK
+    uuid service_id FK
+    uuid category_id FK
+    text action "add or edit"
+    jsonb changes "field before after"
+    text changed_by
+    text approved_by
+    uuid owner_grant_id FK
+  }
+  owner_grants {
+    uuid id PK
+    text action "service = one change"
+    uuid ref "the service"
+    text method "telegram app code"
+    text status
+    timestamptz used_at "one time"
+  }
+  offers {
+    uuid id PK
+    text name
+    text applies_to
+    text kind
+    numeric value
+    date starts_on
+    date ends_on
+    bool show_on_website
+    text web_title
+    text web_text
+    text image
+  }
+  bookings {
+    uuid id PK
+    text ref "code for the customer"
+    text phone "10 digits"
+    uuid customer_id FK
+    date want_date
+    text want_time
+    timestamptz slot_at "confirmed"
+    text source "website whatsapp phone"
+    text status "requested confirmed came no_show"
+    jsonb utm "campaign"
+    uuid offer_id FK
+    uuid staff_id FK
+    uuid bill_id FK
+    int duration_min
+    uuid enquiry_id FK
+    timestamptz confirm_sent_at "WhatsApp"
+    timestamptz reminded_at "WhatsApp"
+  }
+  booking_items {
+    uuid id PK
+    uuid booking_id FK
+    uuid service_id FK
+    text name
+    text option_label
+    numeric price "from the menu"
+    bool price_from
+  }
+  customers {
+    uuid id PK
+    text phone UK "joins everything"
+    text name
+  }
+  bills {
+    uuid id PK
+    text bill_no UK
+    uuid customer_id FK
+  }
+  bill_items {
+    uuid id PK
+    uuid bill_id FK
+    uuid service_id FK
+    text name "copied at billing"
+  }
+  enquiries {
+    uuid id PK
+    text phone "10 digits"
+    text name
+    text source "whatsapp website phone instagram"
+    text message "what they asked"
+    uuid_array service_ids
+    text status "new replied follow_up booked came closed"
+    date follow_up_on
+    text close_reason
+    uuid booking_id FK
+  }
+  staff {
+    uuid id PK
+    text name
+  }
