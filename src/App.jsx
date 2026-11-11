@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ReceiptText, ListOrdered, Users, UserCog, Package, BarChart3, Settings as Cog, Lock, Unlock, CloudUpload, RefreshCw, ShieldCheck, CalendarDays, SunMoon } from 'lucide-react';
 import { DisplayModal } from './components/DisplayModal';
+import { AlertBars } from './components/Alerts';
 import { db, getDb, IS_DEMO, subscribeSync, uploadNow, loginApi, ownerApi } from './lib/db';
 import { waAutoOn } from './lib/waAuto';
 import { deviceName, LoginList } from './components/Logins';
@@ -334,6 +335,7 @@ function Shell({ onSignOut }) {
           {page !== 'bill' && page !== 'bills' && page !== 'customers' && <b>This page needs internet.</b>}
         </div>
       )}
+      {online && <AlertBars onOpenBills={() => go('bills')} />}
       <main className="main">
         {page === 'bill' && <Billing hasBanner={banner} />}
         {page === 'appts' && <Appointments onOpenBill={() => go('bill')} onCounts={setAppts} />}

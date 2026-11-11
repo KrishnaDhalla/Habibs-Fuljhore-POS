@@ -138,6 +138,7 @@ Anything that fails: note the screen and the red message, fix it, run the list a
 
 - [ ] GitHub repo → Settings → Secrets and variables → Actions → `SUPABASE_DB_URL` = the **Live** project's Session pooler connection string
 - [ ] Actions → *Daily database backup* → **Run workflow** → green tick, and a `.dump` file under Artifacts
+- [ ] In the app (owner): **Settings → Data & backup → Nightly backup** shows that backup; download it, tap **I downloaded it**
 - [ ] In the app: Settings → Data & backup → Download full backup works
 
 ## Step 8. Fill in Live (1–2 hours) — README section 4

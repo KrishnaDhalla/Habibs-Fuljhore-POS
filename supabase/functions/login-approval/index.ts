@@ -24,7 +24,8 @@
 //    (once, within 10 minutes of the request). Approved days become L in attendance by themselves.
 // 13. { action: 'day' }: the morning message, once a day (the first time the app is opened, or at 9:00 by the daily
 //    schedule in supabase/05_daily_schedule.sql): who is on leave today and tomorrow, leave waiting for an answer,
-//    today's bookings, who didn't check in yesterday; on Mondays everyone's leave this week. Then, for planning, one
+//    today's bookings, who didn't check in yesterday; on Mondays everyone's leave this week; backups to download (Mondays,
+//    or every morning when one is about to be deleted by GitHub), or the nightly backup not running. Then, for planning, one
 //    message per leave coming up (7, 3 and 1 days before: the bookings given to them on those days, who else is off).
 // 14. { action: 'leave_plan', id }: leave was just approved in the app; if it starts within a week, the planning
 //    message goes now (approving on Telegram does the same by itself).
@@ -414,6 +415,23 @@ async function notifyLeavePlan(req: Request, id: string) {
   return json({ ok: true, sent: await sendPlan(id) });
 }
 
+// The backup part of the morning message (backup_status() in the database decides): the nightly backup stopped; a
+// backup is about to be deleted by GitHub and none was downloaded in 25 days (every morning); on Mondays, download one.
+const istOf = (ts: string) => new Date(Date.parse(ts) + 330 * 60000).toISOString().slice(0, 10); // the day in India
+export function backupLines(b: any, today: string) {
+  if (!b || !b.latest) return '';
+  const out: string[] = [];
+  const link = b.latest.run_url ? `\n${b.latest.run_url}` : '';
+  if (b.stale) out.push(`Backup: the nightly backup hasn't run since ${dayName(istOf(b.latest.made_at))}. Check GitHub → Actions → Daily database backup.`);
+  if (b.urgent) {
+    out.push(`Backup: download one now. GitHub deletes the backup of ${dayName(istOf(b.urgent.made_at))} on ${dayName(istOf(b.urgent.expires_at))}, and none was downloaded in 25 days.` +
+      `\nOpen the newest backup (Artifacts → download), keep it on Google Drive, then in the app: Settings → Data & backup → I downloaded it.${link}`);
+  } else if (b.due && new Date(today + 'T12:00:00Z').getUTCDay() === 1) {
+    out.push(`Backup: this week's copy to keep. Download the newest backup (Artifacts → download) and keep it on Google Drive, then in the app: Settings → Data & backup → I downloaded it.${link}`);
+  }
+  return out.join('\n\n');
+}
+
 // ---- 13. The app tells us: the app was opened today (the database sends the morning message once a day) ----
 //      Or the daily 9:00 schedule calls with the cron secret.
 async function notifyDay(req: Request) {
@@ -439,6 +457,8 @@ async function notifyDay(req: Request) {
       ? `Leave this week:\n` + d.week_leave.map((x: any) => `• ${x.name}: ${span(x.from, x.to)}${x.status === 'pending' ? ' (waiting for your answer)' : ''}`).join('\n')
       : 'Leave this week: nobody.');
   }
+  const bk = backupLines(d.backup, d.day);
+  if (bk) lines.push(bk);
   let sent = lines.length ? await sendTextToOwners(`Good morning: ${dayName(d.day)}\n\n` + lines.join('\n\n')) : 0;
   // planning: one message per leave coming up
   for (const p of d.leave_ahead || []) sent += await sendTextToOwners(planText(p));

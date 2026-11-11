@@ -176,8 +176,10 @@ ok('values: a staff member\'s own bill says nothing about points', billValues(bi
 ok('values: paid with points, no new points', billValues({ ...bills[0], points_earned: 0 })[3] === 'You paid ₹100 with loyalty points, balance 270.');
 ok('values: never a new line, a tab or 4 spaces (WhatsApp refuses them)', !/[\n\t]| {4}/.test(billValues({ ...bills[0], customer_name: 'A\tB', bill_no: 'X\nY' }).join('|')));
 // Meta's errors
+tg.length = 0;
 const nw = await send(id(7));
 ok('a number not on WhatsApp: failed, in plain words, recorded', nw[1].ok === false && /can't get WhatsApp messages/.test(nw[1].error) && wa.some((r) => r.bill_id === id(7) && r.status === 'failed' && /can't get WhatsApp/.test(r.error)), JSON.stringify(nw));
+ok('…and both owners are told on Telegram at once: the bill number, the number, why', tg.length === 2 && /^WhatsApp bill HF2627-\d{4} not sent to \d{5} \d{5}\n.*can't get WhatsApp.*\nSend it the other way from Bills/s.test(tg[0].text), JSON.stringify(tg));
 metaMode = 'no-template';
 const nt = await send(id(5));
 ok('the template not approved yet: says so', /template "bill_receipt" isn't approved yet/.test(nt[1].error || ''), JSON.stringify(nt));
@@ -227,7 +229,7 @@ ok('a late "sent" doesn\'t go back either', (await hook(statusUpdate('wamid.1', 
 const row2 = wa.find((r) => r.wamid === 'wamid.2');
 tg.length = 0;
 await hook(statusUpdate('wamid.2', 'failed', [{ code: 131026, title: 'Message undeliverable' }]));
-ok('…and both owners are told on Telegram that the bill was not delivered', tg.length === 2 && /WhatsApp bill not delivered to \d{5} \d{5}\n.*can't get WhatsApp/.test(tg[0].text), JSON.stringify(tg));
+ok('…and both owners are told on Telegram that the bill was not delivered', tg.length === 2 && /WhatsApp bill HF2627-0042 not delivered to \d{5} \d{5}\n.*can't get WhatsApp/.test(tg[0].text), JSON.stringify(tg));
 ok('failed later (by Meta): failed, with the reason in plain words', row2.status === 'failed' && /can't get WhatsApp/.test(row2.error), JSON.stringify(row2));
 ok('an update for a message that isn\'t ours: nothing', (await hook(statusUpdate('wamid.other', 'read')))[1].updated === 0);
 // customers' replies → the owners on Telegram

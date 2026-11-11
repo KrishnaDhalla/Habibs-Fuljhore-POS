@@ -1320,6 +1320,74 @@ for (const [t, want] of fyCases) {
   }
 }
 
+{
+  // ---------- backups: the nightly GitHub backup records each file; the owner is reminded to download one ----------
+  const at = (days) => new Date(Date.parse('2026-11-16T06:00:00Z') + days * 86400000).toISOString(); // a Monday, 11:30 in India
+  const st = async (now) => (await q(`select backup_status($1::timestamptz) s`, [now]))[0].s;
+  check('backups: nothing before the first backup', (await st(at(0))) === null);
+  // the workflow writes with the database login (no row security), 30 days kept
+  for (let i = 30; i >= 1; i--) {
+    await q(`insert into backups (made_at, file, size_bytes, run_url, expires_at) values ($1, $2, 1000, $3, $1::timestamptz + interval '30 days')`,
+      [at(-i), `habibs-${at(-i).slice(0, 10)}.dump`, `https://github.com/x/y/actions/runs/${i}`]);
+  }
+  let s = await st(at(0));
+  check('backups: the newest one, 29 still kept (the 30-day-old one goes now), never downloaded → due', s.latest.file === `habibs-${at(-1).slice(0, 10)}.dump` && s.kept === 29 && s.due === true && s.last_download === null && s.stale === false, JSON.stringify(s));
+  check('backups: never downloaded and one goes within 5 days → urgent, naming the oldest', !!s.urgent && Date.parse(s.urgent.made_at) === Date.parse(at(-29)), JSON.stringify(s.urgent));
+  // the app: only the owner sees it; the counter gets nothing and can't read the table
+  const ca = await as(clerk, sClerk, () => q(`select backup_alert() a`));
+  const cr = await as(clerk, sClerk, () => q(`select count(*)::int n from backups`));
+  check('backups: the counter sees no reminder and no backups', ca[0].a === null && cr[0].n === 0, JSON.stringify([ca, cr]));
+  const oa = await as(owner, sOwner, () => q(`select backup_alert() a`));
+  const or = await as(owner, sOwner, () => q(`select count(*)::int n from backups`));
+  check('backups: the owner sees the reminder and the list', oa[0].a && oa[0].a.latest && or[0].n === 30, JSON.stringify(or));
+  check('backups: the counter cannot mark one downloaded', !!(await as(clerk, sClerk, () => tryq(`select * from mark_backup_downloaded($1)`, [s.latest.id]))).error);
+  check('backups: the counter cannot add one', !!(await as(clerk, sClerk, () => tryq(`insert into backups (file, expires_at) values ('x', now())`))).error);
+  await db.exec('set role anon');
+  const an = await tryq(`select backup_status(now())`);
+  await db.exec('reset role');
+  check('backups: the website cannot read the status', !!an.error, JSON.stringify(an));
+  // the owner downloads it
+  const m = await as(owner, sOwner, () => q(`select * from mark_backup_downloaded($1)`, [s.latest.id]));
+  check('backups: "I downloaded it" records when (by the owner)', m[0].downloaded_at && m[0].id === s.latest.id, JSON.stringify(m));
+  await q(`update backups set downloaded_at = $1 where id = $2`, [at(0), s.latest.id]);
+  s = await st(at(0));
+  check('backups: just downloaded → nothing due, nothing urgent', s.due === false && s.urgent === null && Date.parse(s.last_download) === Date.parse(at(0)), JSON.stringify(s));
+  s = await st(at(7));
+  check('backups: a week later → due again (the Monday reminder)', s.due === true && s.urgent === null, JSON.stringify(s));
+  s = await st(at(26));
+  check('backups: 26 days without a download, one goes within 5 days → urgent', s.due === true && !!s.urgent, JSON.stringify(s));
+  check('backups: no backup for 3 days → stale (the nightly backup stopped)', (await st(at(2))).stale === true && (await st(at(1))).stale === false);
+  // the morning message carries it
+  const ds = (await q(`select day_summary() d`))[0].d;
+  check('backups: in the morning summary', ds && ds.backup && ds.backup.latest, JSON.stringify(ds && ds.backup));
+  await q(`delete from backups`);
+  await q(`delete from alerts_sent where kind like 'day %'`);
+}
+{
+  // the app's bars (src/lib/alerts.js)
+  const { failedBills, backupAlert } = await import('../src/lib/alerts.js');
+  const now = Date.parse('2026-11-16T10:00:00Z');
+  const h = (n) => new Date(now - n * 3600000).toISOString();
+  const rows = [
+    { id: 'a1', bill_id: 'A', kind: 'bill', status: 'failed', created_at: h(3), phone: '9831100021', error: 'No WhatsApp' },
+    { id: 'a2', bill_id: 'A', kind: 'bill', status: 'delivered', created_at: h(2) },            // sent again: fine now
+    { id: 'b1', bill_id: 'B', kind: 'bill', status: 'sent', created_at: h(5) },
+    { id: 'b2', bill_id: 'B', kind: 'bill', status: 'failed', created_at: h(1), error: 'Blocked' },
+    { id: 'c1', bill_id: 'C', kind: 'bill', status: 'failed', created_at: h(30) },              // older than a day
+    { id: 'd1', bill_id: 'D', kind: 'feedback', status: 'failed', created_at: h(1) },            // not a bill
+    { id: 'e1', bill_id: 'E', status: 'failed', created_at: h(2), updated_at: h(0.5) },          // kind missing = bill
+  ];
+  const f = failedBills(rows, { now });
+  check('alerts: failed bills = newest send failed, last 24 h, bills only, newest first', JSON.stringify(f.map((x) => x.bill_id)) === JSON.stringify(['E', 'B']), JSON.stringify(f));
+  check('alerts: "Done" on this device hides them', failedBills(rows, { now, dismissed: ['e1', 'b2'] }).length === 0);
+  check('alerts: no backup → no bar', backupAlert(null) === null && backupAlert({}) === null);
+  const L = { made_at: '2026-11-15T21:30:00Z', run_url: 'u' };
+  check('alerts: stale beats the rest (red)', backupAlert({ latest: L, stale: true, due: true, urgent: { made_at: L.made_at, expires_at: L.made_at } }).level === 'bad');
+  check('alerts: urgent (red) names the dates', /GitHub deletes the one of .* on /.test(backupAlert({ latest: L, due: true, urgent: { made_at: '2026-10-17T21:30:00Z', expires_at: '2026-11-16T21:30:00Z' } }).text));
+  check('alerts: due (yellow), says when last downloaded', backupAlert({ latest: L, due: true, last_download: '2026-11-01T05:00:00Z' }).level === 'warn' && /last downloaded/.test(backupAlert({ latest: L, due: true, last_download: '2026-11-01T05:00:00Z' }).text));
+  check('alerts: downloaded recently → no bar', backupAlert({ latest: L, due: false, stale: false, urgent: null }) === null);
+}
+
 console.log(`${checks.toLocaleString()} database checks, ${fails.length} failed`);
 for (const f of [...new Set(fails)].slice(0, 40)) console.log(f);
 process.exitCode = fails.length ? 1 : 0;

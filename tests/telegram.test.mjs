@@ -299,6 +299,21 @@ tg.length = 0;
 daySummary = { day: '2026-11-11', leave_today: ['Amit Das'], leave_tomorrow: [], pending_leave: [], bookings_today: 0, requests: 0, not_checked_in: [], leave_ahead: [] };
 ok('daily schedule: the cron secret works without a login', (await call({ 'x-cron-secret': 'cr0n' }, { action: 'day' }))[1].sent === 2);
 ok('daily schedule: a wrong secret is refused', (await call({ 'x-cron-secret': 'nope' }, { action: 'day' }))[0] === 401);
+// backups in the morning message (backup_status() in the database decides)
+{
+  const L = { id: 'b1', made_at: '2026-11-15T21:30:00Z', file: 'habibs-2026-11-15.dump', run_url: 'https://github.com/x/y/actions/runs/9', expires_at: '2026-12-15T21:30:00Z' };
+  const base = { leave_today: [], leave_tomorrow: [], pending_leave: [], bookings_today: 0, requests: 0, not_checked_in: [], leave_ahead: [] };
+  const say = async (backup, day) => { tg.length = 0; daySummary = { ...base, day, backup }; await call(A, { action: 'day' }); return tg[0] ? tg[0][1].text : ''; };
+  const mon = await say({ latest: L, due: true, stale: false, urgent: null }, '2026-11-16');
+  ok('backup: Monday, due → "this week\'s copy" with the link to the run', /Backup: this week's copy to keep\. Download the newest backup/.test(mon) && /actions\/runs\/9/.test(mon) && /I downloaded it/.test(mon), mon);
+  ok('backup: due on a Tuesday → nothing (once a week)', (await say({ latest: L, due: true, stale: false, urgent: null }, '2026-11-17')) === '');
+  const urg = await say({ latest: L, due: true, stale: false, urgent: { made_at: '2026-10-17T21:30:00Z', expires_at: '2026-11-16T21:30:00Z', run_url: 'r' } }, '2026-11-12');
+  ok('backup: urgent, any day → the dates in India (3 AM the next day), download now', /Backup: download one now\. GitHub deletes the backup of Sun, 18 Oct on Tue, 17 Nov, and none was downloaded in 25 days\./.test(urg), urg);
+  const stale = await say({ latest: { ...L, made_at: '2026-11-08T21:30:00Z' }, due: false, stale: true, urgent: null }, '2026-11-12');
+  ok('backup: stale → the nightly backup hasn\'t run since …', /Backup: the nightly backup hasn't run since Mon, 09 Nov\. Check GitHub → Actions/.test(stale), stale);
+  ok('backup: downloaded recently → nothing', (await say({ latest: L, due: false, stale: false, urgent: null }, '2026-11-16')) === '');
+  ok('backup: no backups yet → nothing', (await say(null, '2026-11-16')) === '');
+}
 // leave approved in the app: the planning message
 tg.length = 0;
 ok('approved in the app: not signed in → refused; a made-up id → refused', (await call({}, { action: 'leave_plan', id: lid3 }))[0] === 401 && (await call(A, { action: 'leave_plan', id: 'x' }))[0] === 400);

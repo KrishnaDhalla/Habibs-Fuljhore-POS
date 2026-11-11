@@ -186,6 +186,8 @@ async function sendBill(req: Request, body: any) {
   const fail = async (e: any) => {
     const text = errorText(e);
     if (row) await rest(`wa_messages?id=eq.${row.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'failed', error: text, updated_at: new Date().toISOString() }) });
+    // the counter sees it on the screen; the owners hear of it too (the bill didn't reach the customer)
+    await telegramOwners(`WhatsApp bill ${b.bill_no} not sent to ${phone10(b.customer_phone)}\n${text}\nSend it the other way from Bills (WhatsApp, 2 taps).`).catch(() => 0);
     return json({ ok: false, status: 'failed', error: text });
   };
   try {
@@ -357,7 +359,13 @@ async function fromMeta(req: Request) {
           updated += rows.length;
           // a bill that didn't reach the customer: the owners hear of it
           if (st.status === 'failed') for (const w of rows) if (w.kind === 'slip') forwarded += await telegramOwners(`Salary slip not delivered on WhatsApp to ${phone10(w.phone)}\n${slipError(patch.error)}\nPrint it from Staff → Payroll.`);
-          if (st.status === 'failed') for (const w of rows) if ((w.kind || 'bill') === 'bill') forwarded += await telegramOwners(`WhatsApp bill not delivered to ${phone10(w.phone)}\n${patch.error}\nSend it the other way from Bills (WhatsApp, 2 taps).`);
+          if (st.status === 'failed') {
+            for (const w of rows) {
+              if ((w.kind || 'bill') !== 'bill') continue;
+              const bn = w.bill_id ? await rest(`bills?id=eq.${w.bill_id}&select=bill_no`).then((x) => (x.ok ? x.json() : [])).then((x) => (x[0] && x[0].bill_no) || '').catch(() => '') : '';
+              forwarded += await telegramOwners(`WhatsApp bill ${bn ? bn + ' ' : ''}not delivered to ${phone10(w.phone)}\n${patch.error}\nSend it the other way from Bills (WhatsApp, 2 taps).`);
+            }
+          }
         }
       }
       for (const m of v.messages || []) {

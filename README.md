@@ -232,6 +232,8 @@ The free Supabase plan does not include backups, so set up both of these:
 
 - **Daily, automatic:** `.github/workflows/backup.yml` dumps the whole database every night at 3 AM to your private GitHub repo's Actions tab (kept 30 days). Add one secret first: GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**, name `SUPABASE_DB_URL`, value = Supabase **Connect → Session pooler** connection string with your password filled in. Use **Actions → Daily database backup → Run workflow** once to test it.
 - **Weekly, by hand:** **Settings → Data & backup → Download full backup** and keep the file on Google Drive.
+- **Reminders (November 2026):** each nightly backup is recorded in the database (table `backups`), so the owner is reminded to download one before GitHub deletes it: on **Mondays** (Telegram morning message and a yellow bar in the app), **every morning** in red when nothing was downloaded in 25 days and a backup goes within 5 days, and when the nightly backup **stopped** (none for 2 days). Download the newest from its GitHub run page (Artifacts), keep it on Google Drive, then **Settings → Data & backup → I downloaded it**; the reminders stop for a week.
+- **Bills that didn't reach the customer on WhatsApp** (WhatsApp Business, 2e): the owners get a Telegram message at once (wrong number, not on WhatsApp, a set-up problem) or when Meta reports it later, with the bill number; the app shows a red bar for a day to send it the other way from Bills.
 
 When the salon is busy enough, the Supabase Pro plan (US$25/month) adds daily backups and removes the free-plan pause after 7 days of no use.
 

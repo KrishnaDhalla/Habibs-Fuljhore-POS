@@ -2953,6 +2953,8 @@ begin
                                                order by greatest(l.from_day, v_today), s.name), '[]'::jsonb)
                        from leave_requests l join staff s on s.id = l.staff_id
                       where l.status in ('approved', 'pending') and l.from_day <= v_today + 6 and l.to_day >= v_today) end,
+    -- backups to download (Mondays), about to be deleted, or not running (backup_status(), at the end of this file)
+    'backup', backup_status(now()),
     'bookings_today', (select count(*) from bookings where want_date = v_today and status in ('requested', 'confirmed')),
     'requests', (select count(*) from bookings where status = 'requested' and want_date >= v_today),
     'not_checked_in', (select coalesce(jsonb_agg(s.name order by s.name), '[]'::jsonb) from staff s
@@ -3658,7 +3660,7 @@ insert into settings (key, value) values
   ('whatsapp',          '""'),           -- WhatsApp number for the website (empty = the phone number)
   ('maps_url',          '""'),           -- Google Maps link for the website
   ('paid_offs_per_month', '4'),         -- days off a month in the day rate: salary ÷ (days in month − this); not taken = paid, above = unpaid
-  ('leave_blocked_days', '[5, 6, 0]'),  -- no days off on these weekdays (0 Sunday … 6 Saturday), except medical leave
+  ('leave_blocked_days', '[5, 6, 0]'),  -- busy days (0 Sunday … 6 Saturday): leave on them is flagged to the owner, who decides
   ('leave_notice_days', '14'),          -- 2 or more days off in a month's last week: asked this many days before
   ('leave_one_at_a_time', 'true'),      -- one person off a day
   ('staff_free_sections', '["Hair", "Threading", "Waxing"]'), -- staff's own services on these billing tabs are free
@@ -3685,3 +3687,73 @@ insert into settings (key, value) values
   ('loyalty_expiry_months', '12'),      -- points expire this many months after the last visit
   ('loyalty_products',      'false')    -- products earn points too
 on conflict (key) do nothing;
+
+-- =====================================================================
+-- Backups (November 2026)
+--   The nightly GitHub backup (.github/workflows/backup.yml) records each file it makes here. GitHub deletes each
+--   file after 30 days, so the owners are reminded to download one and keep it (Google Drive, a pen drive):
+--     due:    nothing downloaded in the last 6 days (or ever): the Monday morning message, and a bar in the app
+--     urgent: nothing downloaded in 25 days and a backup is deleted within 5 days: every morning, until one is
+--     stale:  the newest backup is more than 2 days old: the nightly backup stopped (GitHub → Actions)
+--   The owner taps "I downloaded it" in the app (Settings → Data & backup); that stops the reminders for 6 days.
+--   Only the owner can see this table; the backup itself writes to it with the database login (no row security).
+-- =====================================================================
+create table if not exists backups (
+  id            uuid primary key default gen_random_uuid(),
+  made_at       timestamptz not null default now(),
+  file          text not null,
+  size_bytes    bigint,
+  run_url       text,                    -- the GitHub run page: the file is under Artifacts there
+  expires_at    timestamptz not null,    -- when GitHub deletes it
+  downloaded_at timestamptz,             -- the owner said they downloaded it
+  downloaded_by text
+);
+create index if not exists backups_made_idx on backups (made_at desc);
+alter table backups enable row level security;
+drop policy if exists "owner reads" on backups;
+create policy "owner reads" on backups for select to authenticated using ((select owner_ok()));
+
+-- What to remind about (the morning message and the app say the same), or null before the first backup
+create or replace function backup_status(p_now timestamptz default now()) returns jsonb
+language sql stable security definer set search_path = public as $$
+  with latest as (select * from backups order by made_at desc limit 1),
+       dl as (select max(downloaded_at) d from backups),
+       going as (select * from backups where downloaded_at is null and expires_at > p_now and expires_at <= p_now + interval '5 days'
+                 order by expires_at limit 1)
+  select case when not exists (select 1 from latest) then null else jsonb_build_object(
+    'latest', (select jsonb_build_object('id', id, 'made_at', made_at, 'file', file, 'run_url', run_url, 'expires_at', expires_at,
+                                         'downloaded_at', downloaded_at) from latest),
+    'last_download', (select d from dl),
+    'kept', (select count(*) from backups where expires_at > p_now),
+    'stale', (select made_at < p_now - interval '2 days' from latest),
+    'due', (select d is null or d < p_now - interval '6 days' from dl),
+    'urgent', case when (select d is null or d < p_now - interval '25 days' from dl)
+                   then (select jsonb_build_object('made_at', made_at, 'expires_at', expires_at, 'run_url', run_url) from going) end
+  ) end;
+$$;
+
+-- The app: the owner sees the reminder (others get null)
+create or replace function backup_alert() returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not owner_ok() then return null; end if;
+  return backup_status(now());
+end $$;
+
+-- The app: "I downloaded it"
+create or replace function mark_backup_downloaded(p_id uuid) returns backups
+language plpgsql security definer set search_path = public as $$
+declare v backups;
+begin
+  if not owner_ok() then raise exception 'Only the owner can do this'; end if;
+  update backups set downloaded_at = now(), downloaded_by = coalesce(auth.jwt() ->> 'email', 'owner')
+   where id = p_id returning * into v;
+  if not found then raise exception 'That backup is not in the list'; end if;
+  return v;
+end $$;
+
+revoke execute on function backup_status(timestamptz)       from public, anon, authenticated;
+revoke execute on function backup_alert()                   from public, anon;
+grant  execute on function backup_alert()                   to authenticated;
+revoke execute on function mark_backup_downloaded(uuid)     from public, anon;
+grant  execute on function mark_backup_downloaded(uuid)     to authenticated;

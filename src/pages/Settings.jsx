@@ -12,6 +12,8 @@ import { LoginSettings } from '../components/Logins';
 import { OfferSettings } from '../components/Offers';
 import { OwnerSettings } from '../components/OwnerSettings';
 import { calcBill } from '../lib/calc';
+import { useBackupStatus } from '../components/Alerts';
+import { backupAlert } from '../lib/alerts';
 
 const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
@@ -295,6 +297,36 @@ const listText = (a) => (Array.isArray(a) ? a.join(', ') : '');
 const textList = (t) => { const a = String(t || '').split(',').map((x) => x.trim()).filter(Boolean); return a.length ? a : null; };
 
 // "Men Cut and Styling: price ₹600 → ₹549 · hidden" — what the owner sees before approving
+// The nightly GitHub backup (.github/workflows/backup.yml): the newest file, and "I downloaded it" for the reminders
+function NightlyBackups() {
+  const { toast } = useApp();
+  const { status, markDownloaded } = useBackupStatus(true);
+  const [busy, setBusy] = useState(false);
+  const l = status && status.latest;
+  const bk = backupAlert(status);
+  return (
+    <div className="card card-pad stack" id="nightly-backups">
+      <h3>Nightly backup (GitHub)</h3>
+      {!l ? (
+        <p className="small muted">No nightly backup recorded yet. Once the GitHub backup runs (3:00 AM), the newest one shows here, and you're reminded every Monday to download one before GitHub deletes it after 30 days.</p>
+      ) : (
+        <>
+          <p className="small">
+            Newest: <b>{fmtDateTime(l.made_at)}</b> ({l.file}), kept by GitHub until {fmtDateTime(l.expires_at)}. {status.kept} kept now.<br />
+            Last downloaded: <b>{status.last_download ? fmtDateTime(status.last_download) : 'never'}</b>
+          </p>
+          {bk && <p className={'small ' + (bk.level === 'bad' ? 'err-text' : 'warn-text')}>{bk.text}</p>}
+          <p className="small muted">Open it on GitHub → Artifacts → download the zip, keep it on Google Drive, then tap the button. The reminders stop for a week.</p>
+          <div className="row wrap" style={{ gap: 8 }}>
+            {l.run_url && <a className="btn line" href={l.run_url} target="_blank" rel="noreferrer"><Download size={15} /> Open the newest backup</a>}
+            <button className="btn primary" disabled={busy} onClick={async () => { setBusy(true); try { await markDownloaded(); toast('Thanks. The next reminder is in a week.', 'ok'); } catch (e) { toast(e.message, 'bad'); } setBusy(false); }}>I downloaded it</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function describeService(old, row, catName) {
   if (!old || !old.id) return `Add service ${row.name} at ${rupee(row.price)}${row.variants ? ' (options ' + variantsToText(row.variants) + ')' : ''} · ${catName || row.category || ''}`;
   const parts = [];
@@ -629,6 +661,7 @@ function DataSettings({ onSignOut }) {
         <p className="small muted">Downloads every table as one file. Keep a copy every week on Google Drive. (The automatic daily backup is set up separately, see the README.)</p>
         <div><button className="btn line" disabled={busy} onClick={backup}><Download size={15} /> {busy ? 'Preparing…' : 'Download full backup'}</button></div>
       </div>
+      {!IS_DEMO && <NightlyBackups />}
       <div className="card card-pad stack">
         <h3>Receipt printing on this device</h3>
         <Seg full options={[['browser', 'Print window'], ['rawbt', 'RawBT app (Android)']]} value={printMethod} onChange={(v) => { setPm(v); setPrintMethod(v); }} />

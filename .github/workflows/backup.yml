@@ -2,7 +2,8 @@
 # Setup: GitHub repo → Settings → Secrets and variables → Actions → New repository secret
 #   Name:  SUPABASE_DB_URL
 #   Value: Supabase → Connect → "Session pooler" connection string, with your database password filled in
-# Each run keeps a .dump file for 30 days under the repo's Actions tab → the run → Artifacts.
+# Each run keeps a .dump file for 30 days under the repo's Actions tab → the run → Artifacts, and records it in the
+# database (table backups) so the app and the Telegram morning message remind the owner to download one in time.
 # Restore with: pg_restore --clean --no-owner -d "<connection string>" habibs-YYYY-MM-DD.dump
 name: Daily database backup
 
@@ -36,3 +37,19 @@ jobs:
           name: habibs-db-${{ github.run_number }}
           path: backups/
           retention-days: 30
+
+      # Tell the app about it (table backups): the owner is reminded to download one before GitHub deletes it,
+      # in the app and in the Telegram morning message. If the database doesn't have the table yet (01_schema.sql
+      # not run again), the backup above is still kept; only the reminder is missing.
+      - name: Record the backup for the reminders
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          f=$(ls backups/*.dump | head -n 1)
+          /usr/lib/postgresql/17/bin/psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -v file="$(basename "$f")" -v size="$(stat -c %s "$f")" -v url="$RUN_URL" <<'SQL'
+          insert into backups (file, size_bytes, run_url, expires_at)
+          values (:'file', :'size'::bigint, :'url', now() + interval '30 days');
+          SQL
