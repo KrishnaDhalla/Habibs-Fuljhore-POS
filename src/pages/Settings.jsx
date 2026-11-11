@@ -140,7 +140,7 @@ function SalonSettings() {
           <div className="form-grid">
             <Field label="Paid days off a month" hint="Week offs and leave together. Not taken: paid. More: unpaid. No carry-over."><input className="input" id="st-offs" inputMode="numeric" value={f.paid_offs_per_month ?? 4} onChange={(e) => setF({ ...f, paid_offs_per_month: e.target.value.replace(/\D/g, '') })} /></Field>
             <Field label="One person off a day"><Seg full options={[[true, 'Yes'], [false, 'No']]} value={f.leave_one_at_a_time !== false} onChange={(v) => setF({ ...f, leave_one_at_a_time: v })} /></Field>
-            <Field label="No days off on (except medical leave)" className="span2">
+            <Field label="Busy days: leave only if the owner agrees" className="span2" hint="Leave on these days can still be asked; you see 'busy day' on it and decide. Medical leave isn't flagged.">
               <div className="chips" id="st-blocked">{WEEK.map(([n, l]) => <button key={n} type="button" className={'chip sm' + (blocked.includes(n) ? ' on' : '')} aria-pressed={blocked.includes(n)} onClick={() => toggle('leave_blocked_days', blocked, n)}>{l}</button>)}</div>
             </Field>
             <Field label="2+ days off in the last week (from the 22nd): ask this many days before" className="span2"><input className="input" id="st-notice" inputMode="numeric" style={{ maxWidth: 120 }} value={f.leave_notice_days ?? 14} onChange={(e) => setF({ ...f, leave_notice_days: e.target.value.replace(/\D/g, '') })} /></Field>

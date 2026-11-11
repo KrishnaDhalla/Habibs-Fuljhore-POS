@@ -353,10 +353,22 @@ const med = (await rl(C, { staff_id: S[2].id, from_day: A[2], to_day: A[3], kind
 check('rule: …medical leave is still asked (the owner decides)', med && med.kind === 'sick');
 await C(`update leave_requests set status = 'cancelled' where id = $1`, [med.id]);
 const fri = nextDow(3, 5);
-const busy = err(await rl(C, { staff_id: S[2].id, from_day: addDays(fri, -1), to_day: addDays(fri, 2) }));
-check('rule: no days off on Friday, Saturday or Sunday (names the first one)', busy === `${leave.ruleDay(fri)}: no days off on Friday, Saturday or Sunday, except medical leave`, busy);
-check('rule: Sunday alone too, and personal or other leave too', /no days off on Friday, Saturday or Sunday/.test(err(await rl(C, { staff_id: S[2].id, from_day: nextDow(3, 0), kind: 'personal' })))
-  && /no days off/.test(err(await rl(C, { staff_id: S[2].id, from_day: nextDow(3, 6), kind: 'other' }))));
+{
+  // busy days (Friday to Sunday): not refused any more; the owner sees them and decides
+  const busyReq = (await rl(C, { staff_id: S[2].id, from_day: fri, to_day: addDays(fri, 2), kind: 'other', reason: 'Chhath Puja' }))[0];
+  check('busy days: leave on Friday to Sunday can be asked (the owner decides)', busyReq && busyReq.status === 'pending', JSON.stringify(busyReq));
+  check('busy days: named for the owner', JSON.stringify(leave.busyDays({ from: addDays(fri, -1), to: addDays(fri, 2), kind: 'other', settings: {} })) === JSON.stringify([fri, addDays(fri, 1), addDays(fri, 2)])
+    && leave.busyNote([fri, addDays(fri, 1)], {}) === `${leave.ruleDay(fri)}, ${leave.ruleDay(addDays(fri, 1))}: busy days (Friday, Saturday or Sunday). Only if the owner agrees.`);
+  check('busy days: medical leave is not flagged', leave.busyDays({ from: fri, to: addDays(fri, 2), kind: 'sick', settings: {} }).length === 0);
+  const ap = (await O(`select * from decide_leave($1, true)`, [busyReq.id]))[0];
+  const ls = await q(`select count(*)::int n from attendance where staff_id = $1 and day between $2 and $3 and status = 'L'`, [S[2].id, fri, addDays(fri, 2)]);
+  check('busy days: the owner approves → L in attendance on those days', ap.status === 'approved' && ls[0].n === 3, JSON.stringify(ls));
+  await O(`update leave_requests set status = 'cancelled' where id = $1`, [busyReq.id]);
+  check('busy days: …and cancelling takes them out again', (await q(`select count(*)::int n from attendance where staff_id = $1 and day between $2 and $3 and status = 'L'`, [S[2].id, fri, addDays(fri, 2)]))[0].n === 0);
+  const sun = (await rl(C, { staff_id: S[2].id, from_day: nextDow(3, 0), kind: 'personal' }))[0];
+  check('busy days: a Sunday alone, personal leave, can be asked too', !!sun);
+  await C(`update leave_requests set status = 'cancelled' where id = $1`, [sun.id]);
+}
 const medFri = (await rl(C, { staff_id: S[2].id, from_day: fri, to_day: addDays(fri, 2), kind: 'sick' }))[0];
 check('rule: medical leave on a Friday to Sunday can be asked', !!medFri);
 await C(`update leave_requests set status = 'cancelled' where id = $1`, [medFri.id]);
@@ -404,10 +416,9 @@ await C(`update leave_requests set status = 'cancelled' where id = $1`, [medFri.
   await O(`update leave_requests set status = 'cancelled' where staff_id = $1 and from_day = $2`, [S[1].id, later]);
   await O(`update settings set value = '14' where key = 'leave_notice_days'`);
   await O(`update settings set value = '[1]' where key = 'leave_blocked_days'`);
-  const e4 = err(await rl(C, { staff_id: S[1].id, from_day: nextDow(60, 1) }));
-  check('settings: no days off on Monday', e4 === `${leave.ruleDay(nextDow(60, 1))}: no days off on Monday, except medical leave`, e4);
-  await O(`update settings set value = '[0, 6]' where key = 'leave_blocked_days'`);
-  check('settings: "Saturday or Sunday" (Monday first)', /no days off on Saturday or Sunday, except/.test(err(await rl(C, { staff_id: S[1].id, from_day: nextDow(60, 0) }))));
+  const mon = nextDow(60, 1);
+  check('settings: busy day Monday', leave.busyNote(leave.busyDays({ from: mon, to: mon, kind: 'planned', settings: { leave_blocked_days: [1] } }), { leave_blocked_days: [1] }) === `${leave.ruleDay(mon)}: a busy day (Monday). Only if the owner agrees.`);
+  check('settings: "Saturday or Sunday" (Monday first)', /\(Saturday or Sunday\)/.test(leave.busyNote([nextDow(60, 0)], { leave_blocked_days: [0, 6] })));
   await O(`update settings set value = '[5, 6, 0]' where key = 'leave_blocked_days'`);
   await O(`update settings set value = 'false' where key = 'leave_one_at_a_time'`);
   const both = (await rl(C, { staff_id: S[2].id, from_day: A[2], to_day: A[3] }))[0];

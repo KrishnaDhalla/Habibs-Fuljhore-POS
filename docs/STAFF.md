@@ -48,12 +48,12 @@ The form shows what the leave does to their paid days off, for example "November
 
 **The owner's rules** (November 2026). The form lists them, says why a request can't be sent, and the database checks them again, so nobody can get round them:
 
-- **No days off on Friday, Saturday or Sunday.** "Fri 13 Nov: no days off on Friday, Saturday or Sunday, except medical leave."
+- **Friday, Saturday and Sunday are busy days.** Leave on them can still be sent; the form, the owner's request card and the Telegram message say "Fri 13 Nov, Sat 14 Nov: busy days (Friday, Saturday or Sunday). Only if the owner agrees." The owner approves or refuses. Medical leave isn't flagged. (Until November 2026 these days were refused outright.)
 - **One person off a day.** Refused if anyone else has leave asked or approved, or a week off or leave marked, on one of the days: "Only one person can be off a day: Amit Das is off on Thu 12 Nov."
 - **The last week of the month (from the 22nd):** 2 or more days off there (this request and any they already have in that week) must be asked **14 days before** the first of them: "… must be asked 14 days before: by Mon 09 Nov." A single day is fine.
 - **Medical leave** is the exception to all three. It can always be asked; the owner still approves it. The form and the Telegram message say who else is off those days, so you can see the cover.
 
-Change them in **Settings → Salon & bill → Staff**: the days with no days off (tap Mon … Sun), one person a day (Yes / No), and the days of notice.
+Change them in **Settings → Salon & bill → Staff**: the busy days (tap Mon … Sun), one person a day (Yes / No), and the days of notice.
 
 **Answering (owner).** Each request comes on Telegram with **Approve / Deny**: who, the days, the kind and reason, and their days off this month so far. You can also answer in the app on Staff → Leave (with the owner's OK). Approved days become **L** in attendance by themselves, except days already marked as a week off, a half day or present.
 

@@ -122,7 +122,7 @@ Do this on the Pad 5 with the **Test** link, counter login. Tick each line. This
 
 **Staff**
 - [ ] Staff list: add one person with your number; set up their face; check in with the camera
-- [ ] Ask for leave on a Friday → refused with the rule; on a Tuesday → Telegram → Approve → L in attendance
+- [ ] Ask for leave on a Friday → "busy day" shown, it can still be sent → Telegram says "Busy day" → Approve → L in attendance
 - [ ] Payroll (last month) → Mark paid → the slip prints
 
 **The rest**

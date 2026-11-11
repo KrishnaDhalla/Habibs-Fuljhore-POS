@@ -4,11 +4,12 @@
 // and a day off above 4 is not paid; nothing carries to next month. Same rule as calcPayroll().
 //
 // The salon's leave rules (Settings → Staff rules), checked when leave is asked (request_leave() in the database):
-//  1. No days off on Friday, Saturday or Sunday (leave_blocked_days), except medical leave.
+//  1. Busy days: Friday, Saturday or Sunday (leave_blocked_days). Not a refusal: the request can be sent, and the
+//     owner sees "busy day" on it and decides (busyDays() below; the database and Telegram say the same).
 //  2. One person off a day (leave_one_at_a_time): not when someone else has leave asked, approved or marked.
 //  3. Two or more days off in the last week of the month (from the 22nd) are asked at least 14 days before
 //     (leave_notice_days): saving the month's days off for the end.
-//  Medical leave is not held to 1–3 (the owner still approves it).
+//  Medical leave is not held to 2–3 and isn't flagged for 1 (the owner still approves it).
 import { addDays, monthDays, monthRange, istDay } from './format';
 
 export const LEAVE_KINDS = [['planned', 'Planned'], ['sick', 'Medical'], ['personal', 'Personal'], ['other', 'Other']];
@@ -44,15 +45,26 @@ export const blockedText = (blocked) => {
   return n.length > 1 ? n.slice(0, -1).join(', ') + ' or ' + n[n.length - 1] : n[0] || '';
 };
 
+// Busy days (Settings: Friday, Saturday, Sunday) in a request: leave on them needs the owner to agree to it.
+// Medical leave isn't flagged. Returns the days, or [].
+export function busyDays({ from, to, kind, settings }) {
+  if (kind === 'sick' || !from) return [];
+  const r = leaveRules(settings);
+  return eachDay(from, to || from).filter((d) => r.blocked.includes(dow(d)));
+}
+// "Fri 13 Nov, Sat 14 Nov: busy days (Friday, Saturday or Sunday). Only if the owner agrees."
+export function busyNote(days, settings) {
+  if (!days.length) return '';
+  return `${days.map(ruleDay).join(', ')}: ${days.length === 1 ? 'a busy day' : 'busy days'} (${blockedText(leaveRules(settings).blocked)}). Only if the owner agrees.`;
+}
+
 // The first leave rule a request breaks, or null. Same answers as leave_rule_error() in the database.
 //   leaves: leave_requests; attendance: rows; staff: everyone (only active staff count for "one person off")
+//   Busy days aren't a refusal: see busyDays().
 export function leaveRuleError({ staffId, from, to, kind, today = istDay(), leaves, attendance, staff, settings }) {
   if (kind === 'sick') return null;
   const r = leaveRules(settings);
   const days = eachDay(from, to || from);
-  // 1. busy days
-  const bad = days.find((d) => r.blocked.includes(dow(d)));
-  if (bad) return `${ruleDay(bad)}: no days off on ${blockedText(r.blocked)}, except medical leave`;
   // 2. one person off a day
   const offOn = (sid, d) => leaves.some((l) => l.staff_id === sid && ['pending', 'approved'].includes(l.status) && l.from_day <= d && l.to_day >= d)
     || attendance.some((a) => a.staff_id === sid && a.day === d && (a.status === 'W' || a.status === 'L'));

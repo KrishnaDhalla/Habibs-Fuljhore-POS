@@ -9,7 +9,7 @@ import { useApp } from '../store';
 import { istDay, addDays, monthRange, fmtMonth, fmtDate, fmtTime } from '../lib/format';
 import { DateNav, Seg, Modal, Field, Empty, Loading, Confirm } from '../components/ui';
 import { loadFace, findFaces, openCamera, facePhoto, bestMatch, createLiveness, MIN_FACE } from '../lib/face';
-import { LEAVE_KINDS, LEAVE_KIND, daysIn, leaveOn, leaveDays, offsPreview, missedCheckIns, leaveMessage, allowanceOf, leaveRuleError, leaveRules, blockedText, othersOff, ruleDay, eachDay } from '../lib/leave';
+import { LEAVE_KINDS, LEAVE_KIND, daysIn, leaveOn, leaveDays, offsPreview, missedCheckIns, leaveMessage, allowanceOf, leaveRuleError, leaveRules, blockedText, othersOff, ruleDay, eachDay, busyDays, busyNote } from '../lib/leave';
 import { waLink } from '../lib/bookings';
 
 export const paidOffsOf = (settings) => (settings && settings.paid_offs_per_month != null && settings.paid_offs_per_month !== '' ? Number(settings.paid_offs_per_month) : 4);
@@ -430,6 +430,8 @@ export function Leave({ onCounts }) {
     const pv = l.status === 'pending' ? offsPreview({ staff: s, attendance: att, from: l.from_day, to: l.to_day, paidOffs }) : [];
     // medical leave skips the rules: the owner sees who else is off those days
     const also = l.status === 'pending' && l.kind === 'sick' ? othersOff({ staffId: l.staff_id, from: l.from_day, to: l.to_day, leaves: rows.filter((x) => x.id !== l.id), attendance: att, staff }) : [];
+    // busy days (Fri, Sat, Sun): allowed only if the owner agrees
+    const busyOn = l.status === 'pending' ? busyDays({ from: l.from_day, to: l.to_day, kind: l.kind, settings }) : [];
     const starts = l.from_day === today ? 'today' : l.from_day === addDays(today, 1) ? 'tomorrow' : l.from_day < today ? 'on now' : `in ${daysIn(today, l.from_day) - 1} days`;
     return (
       <div className="card leave-card" key={l.id} data-leave={s.name}>
@@ -448,6 +450,7 @@ export function Leave({ onCounts }) {
             </div>
           ))}
           {also.length > 0 && <div className="small warn-text leave-also">Also off: {also.map((o) => `${o.name} (${ruleDay(o.day)})`).join(', ')}</div>}
+          {busyOn.length > 0 && <div className="small warn-text leave-busy">{busyNote(busyOn, settings)}</div>}
           <div className="tiny muted">Asked {fmtDate(l.created_at, false)}{l.decided_by ? ` · ${l.status === 'approved' ? 'approved' : l.status === 'rejected' ? 'refused' : 'answered'} by ${l.decided_by}` : ''}</div>
         </div>
         <div className="appt-acts">{actions}</div>
@@ -515,6 +518,7 @@ function LeaveModal({ attendance, rows, startDay, onClose, onSaved }) {
   const rules = leaveRules(settings);
   const rule = s && ok && !overlap ? leaveRuleError({ staffId: s.id, from, to, kind, today, leaves: rows, attendance, staff, settings }) : null;
   const alsoOff = s && ok && kind === 'sick' ? othersOff({ staffId: s.id, from, to, leaves: rows, attendance, staff }) : [];
+  const busyOn = ok ? busyDays({ from, to, kind, settings }) : [];
   const save = async () => {
     if (!s) return setErr('Choose who is asking.');
     if (!ok) return setErr('The last day is before the first.');
@@ -541,7 +545,7 @@ function LeaveModal({ attendance, rows, startDay, onClose, onSaved }) {
         </div>
         <Field label="Kind"><Seg full options={LEAVE_KINDS} value={kind} onChange={setKind} /></Field>
         <ul className="leave-rules tiny muted" id="leave-rules">
-          {rules.blocked.length > 0 && <li>No days off on {blockedText(rules.blocked)}, except medical leave</li>}
+          {rules.blocked.length > 0 && <li>{blockedText(rules.blocked)} are busy days: leave then only if the owner agrees (medical leave is fine)</li>}
           {rules.oneAtATime && <li>One person off a day</li>}
           <li>2 or more days off in the last week of the month (from the 22nd): ask {rules.notice} days before</li>
           <li>{paidOffsOf(settings)} paid days off a month. Days off not taken are paid; they don't carry over to next month.</li>
@@ -561,6 +565,7 @@ function LeaveModal({ attendance, rows, startDay, onClose, onSaved }) {
         )}
         {overlap && <p className="warn-text small">There is already a request for {leaveDays(overlap)}.</p>}
         {rule && <p className="err-text small" id="leave-rule">{rule}</p>}
+        {!rule && busyOn.length > 0 && <p className="warn-text small" id="leave-busy">{busyNote(busyOn, settings)} You can still send it; the owner decides.</p>}
         {alsoOff.length > 0 && <p className="warn-text small" id="leave-also-off">Medical leave can be asked. Also off: {alsoOff.map((o) => `${o.name} (${ruleDay(o.day)})`).join(', ')}. The owner will see this.</p>}
         {err && <p className="err-text">{err}</p>}
       </div>

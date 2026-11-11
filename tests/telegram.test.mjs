@@ -63,7 +63,7 @@ globalThis.fetch = async (url, init = {}) => {
     return res(attendance.filter((a) => (neq ? a.staff_id !== sid : a.staff_id === sid) && a.day >= from && a.day <= to && sts.includes(a.status))
       .map((a) => ({ ...a, staff: STAFF_NAMES[a.staff_id] })));
   }
-  if (u.pathname === '/rest/v1/settings') return res([{ value: 4 }]);
+  if (u.pathname === '/rest/v1/settings') return res(u.searchParams.get('key') === 'eq.leave_blocked_days' ? [{ value: [5, 6, 0] }] : [{ value: 4 }]);
   // products, stock_moves and bookings for the "finished" and "booking" messages
   const table = { '/rest/v1/products': products, '/rest/v1/stock_moves': moves, '/rest/v1/bookings': bookings, '/rest/v1/enquiries': enquiries, '/rest/v1/services': svcRows }[u.pathname];
   if (table) {
@@ -235,6 +235,7 @@ const lt = tg[0] && tg[0][1].text;
 ok('leave: owners get who, which days, how many, why', l1[1].sent === 2 && /Leave request: Amit Das/.test(lt) && /Thu, 12 Nov to Sat, 14 Nov \(3 days\)/.test(lt) && /Planned leave: Sister's wedding/.test(lt), lt);
 ok('leave: says the days off this month so far (week offs and leave; 4 paid)', /Days off in November so far: 2 \(4 paid a month; more are unpaid\)/.test(lt), lt);
 ok('leave: nobody else off those days: no "Also off" line', !/Also off/.test(lt), lt);
+ok('leave: busy days (Fri, Sat) are named for the owner to decide', /Busy days: Fri, 13 Nov, Sat, 14 Nov\. Approve only if you agree to leave then\./.test(lt), lt);
 ok('leave: Approve / Deny buttons', JSON.stringify(tg[0][1].reply_markup.inline_keyboard[0].map((b) => b.callback_data)) === JSON.stringify(['la:' + lid, 'ld:' + lid]));
 tg.length = 0;
 ok('leave: sent only once', (await call(A, { action: 'leave', id: lid }))[1].sent === 0 && tg.length === 0);
@@ -260,6 +261,7 @@ tg.length = 0;
 await call(A, { action: 'leave', id: lid3 });
 const mt = tg[0] && tg[0][1].text;
 ok('medical leave: says "Medical leave: Fever"', /Medical leave: Fever/.test(mt), mt);
+ok('medical leave: no busy-day line', !/Busy day/.test(mt), mt);
 ok('medical leave: who else is off those days (asked or approved leave, a week off; not someone who left or cancelled leave)',
   /Also off on these days: Sneha Paul \(Wed, 18 Nov to Thu, 19 Nov\), Priya Saha \(Fri, 20 Nov\)\n/.test(mt) && !/Rahul|Old Leave/.test(mt), mt);
 await tgcall('ld:' + lid2);

@@ -355,10 +355,21 @@ async function notifyLeave(req: Request, id: string) {
   const alsoOff = new Set<string>();
   for (const o of Array.isArray(others) ? others : []) if (o.staff && o.staff.active) alsoOff.add(`${o.staff.name} (${o.from_day === o.to_day ? dayName(o.from_day) : `${dayName(o.from_day)} to ${dayName(o.to_day)}`})`);
   for (const a of Array.isArray(marked) ? marked : []) if (a.staff && a.staff.active) alsoOff.add(`${a.staff.name} (${dayName(a.day)})`);
+  // Busy days (Settings: Fri, Sat, Sun): the request isn't refused, the owner decides (medical leave isn't flagged)
+  const bset = (await (await rest(`settings?key=eq.leave_blocked_days&select=value`)).json())[0];
+  const blocked: number[] = bset && Array.isArray(bset.value) ? bset.value.map(Number) : [5, 6, 0];
+  const busy: string[] = [];
+  if (l.kind !== 'sick') {
+    for (let t = Date.parse(l.from_day + 'T12:00:00Z'); t <= Date.parse(l.to_day + 'T12:00:00Z'); t += 86400000) {
+      const d = new Date(t).toISOString().slice(0, 10);
+      if (blocked.includes(new Date(t).getUTCDay())) busy.push(dayName(d));
+    }
+  }
   const text =
     `Leave request: ${name}\n\n` +
     `${l.from_day === l.to_day ? dayName(l.from_day) : `${dayName(l.from_day)} to ${dayName(l.to_day)}`} (${n} ${n === 1 ? 'day' : 'days'})\n` +
     `${KIND[l.kind] || l.kind}${l.reason ? `: ${l.reason}` : ''}\n\n` +
+    (busy.length ? `Busy ${busy.length === 1 ? 'day' : 'days'}: ${busy.join(', ')}. Approve only if you agree to leave then.\n\n` : '') +
     (alsoOff.size ? `Also off on these days: ${[...alsoOff].join(', ')}\n\n` : '') +
     `Days off in ${new Date(l.from_day + 'T12:00:00+05:30').toLocaleDateString('en-IN', { month: 'long' })} so far: ${Array.isArray(off) ? off.length : 0} (${paid} paid a month; more are unpaid).\n` +
     `Asked ${when(l.created_at)} by ${l.requested_by || 'the counter'}.`;

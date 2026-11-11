@@ -2782,7 +2782,8 @@ end $$;
 
 -- A request made at the counter: one at a time per person for the same days, not in the past
 -- The salon's leave rules (Settings → Staff rules; same as leaveRuleError() in src/lib/leave.js):
---  1. No days off on Friday, Saturday or Sunday (leave_blocked_days), except medical leave.
+--  1. Busy days: Friday, Saturday or Sunday (leave_blocked_days). Not a refusal (since November 2026): the request
+--     goes to the owner, who sees "busy day" on it (app and Telegram) and decides.
 --  2. One person off a day (leave_one_at_a_time): not when someone else has leave asked, approved or marked.
 --  3. Two or more days off in the last week of a month (from the 22nd) are asked at least 14 days before
 --     (leave_notice_days): saving the month's days off for the end.
@@ -2791,12 +2792,8 @@ create or replace function leave_rule_error(p_staff uuid, p_from date, p_to date
                                             p_today date default (now() at time zone 'Asia/Kolkata')::date)
 returns text language plpgsql stable security definer set search_path = public as $$
 declare
-  v_block int[] := coalesce((select array(select jsonb_array_elements_text(value)::int) from settings
-                             where key = 'leave_blocked_days' and jsonb_typeof(value) = 'array'), array[5, 6, 0]);
   v_notice int := greatest(0, coalesce((select (value #>> '{}')::int from settings where key = 'leave_notice_days'), 14));
   v_one boolean := coalesce((select (value #>> '{}')::boolean from settings where key = 'leave_one_at_a_time'), true);
-  v_names text[];
-  v_bad date;
   v_other text;
   m date;
   v_last date;
@@ -2804,18 +2801,7 @@ declare
   v_n int;
 begin
   if p_kind = 'sick' then return null; end if;
-  -- 1. busy days
-  select min(t::date) into v_bad from generate_series(p_from, p_to, interval '1 day') t where extract(dow from t)::int = any (v_block);
-  if v_bad is not null then
-    -- "Friday, Saturday or Sunday" (Monday first)
-    select array_agg(n order by (i::int + 5) % 7) into v_names
-      from unnest(array['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']) with ordinality w(n, i)
-     where (i::int - 1) = any (v_block);
-    return to_char(v_bad, 'Dy DD Mon') || ': no days off on '
-      || case when cardinality(v_names) > 1 then array_to_string(v_names[1:cardinality(v_names) - 1], ', ') || ' or ' || v_names[cardinality(v_names)]
-              else v_names[1] end
-      || ', except medical leave';
-  end if;
+  -- 1. busy days: not a refusal any more; the owner sees them on the request and decides
   -- 2. one person off a day
   if v_one then
     select s.name || ' is off on ' || to_char(x.t, 'Dy DD Mon') into v_other
