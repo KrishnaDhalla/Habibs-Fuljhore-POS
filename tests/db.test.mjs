@@ -1304,6 +1304,22 @@ for (const [t, want] of fyCases) {
   check('numbering continues after re-run', b.bill_no === `HF${fy}-${String(ctr).padStart(4, '0')}` && ctr === before + 1, `${b.bill_no} ctr ${ctr}`);
 }
 
+{
+  // The app's list() ends every query with a unique column: "id", or the table's own key (KEY_OF in supadb.js).
+  // A table without an id that isn't in KEY_OF fails on the real database ("column staff_faces.id does not exist").
+  const cols = await db.query(`select c.table_name t from information_schema.tables c where c.table_schema = 'public' and c.table_type = 'BASE TABLE'
+                                 and not exists (select 1 from information_schema.columns x where x.table_schema = 'public' and x.table_name = c.table_name and x.column_name = 'id')`);
+  const src = readFileSync('src/lib/supadb.js', 'utf8');
+  const keyOf = Object.fromEntries([...src.match(/const KEY_OF = \{([^}]*)\}/)[1].matchAll(/(\w+): '(\w+)'/g)].map((m) => [m[1], m[2]]));
+  const skip = new Set(['alerts_sent']); // the app never lists it (two-column key)
+  for (const { t } of cols.rows) {
+    if (skip.has(t)) continue;
+    const k = keyOf[t];
+    const has = k && (await db.query(`select 1 from information_schema.columns where table_schema = 'public' and table_name = $1 and column_name = $2`, [t, k])).rows.length === 1;
+    check(`list(): ${t} has no id, so it is sorted by its own key (KEY_OF in supadb.js)`, !!has, `${t} → ${k}`);
+  }
+}
+
 console.log(`${checks.toLocaleString()} database checks, ${fails.length} failed`);
 for (const f of [...new Set(fails)].slice(0, 40)) console.log(f);
 process.exitCode = fails.length ? 1 : 0;

@@ -23,6 +23,8 @@ export function createSupaDb(url, key) {
     return data;
   };
 
+  // The unique column of each table that has no "id" (see 01_schema.sql); every other table has an id
+  const KEY_OF = { settings: 'key', counters: 'key', staff_faces: 'staff_id', unit_ends: 'move_id', app_roles: 'user_id', login_requests: 'session_id', owner_secrets: 'user_id' };
   function build(t, o) {
     let q = sb.from(t).select(o.select || '*');
     for (const [k, v] of Object.entries(o.eq || {})) q = q.eq(k, v);
@@ -38,10 +40,10 @@ export function createSupaDb(url, key) {
     }
     // Always end with a unique column, so reading page by page never skips or repeats a row
     // (all lines of one bill share the same time)
-    const noId = t === 'settings' || t === 'counters';
+    // (tables without an id column end with their own key instead)
+    const key = KEY_OF[t] || 'id';
     if (o.order) q = q.order(o.order[0], { ascending: o.order[1] !== 'desc' });
-    if (!noId && (!o.order || o.order[0] !== 'id')) q = q.order('id');
-    else if (noId && !o.order) q = q.order('key');
+    if (!o.order || o.order[0] !== key) q = q.order(key);
     return q;
   }
 
