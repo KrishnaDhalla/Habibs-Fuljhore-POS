@@ -46,7 +46,15 @@ export function offerCovers(o, line, service) {
   return false;
 }
 
-// Saving on one line in paise: % off, ₹ off each, or a special price
+// A combo: a set of services (service_ids, at least 2) for one price (value), e.g. "Diwali Glow ₹1,799"
+export const isCombo = (o) => !!o && o.kind === 'combo';
+// What the combo's services cost at menu prices ("worth ₹2,248"), and whether they are all on the menu
+export function comboWorth(o, servicesById = {}) {
+  const list = (o.service_ids || []).map((id) => servicesById[id]);
+  return { worth: round2(list.reduce((a, s) => a + (s ? Number(s.price) || 0 : 0), 0)), services: list, missing: list.some((s) => !s || !s.active) };
+}
+
+// Saving on one line in paise: % off, ₹ off each, or a special price (a combo is worked out across lines)
 function savingP(o, unitPrice, qty) {
   const p = Math.max(0, toPaise(unitPrice));
   const q = Math.max(0, Number(qty) || 0);
@@ -130,16 +138,45 @@ export function applyOffers(lines, offers, { now = istNow(), servicesById = {}, 
     const covers = lines.some((l) => offerCovers(o, l, svc(l)));
     if (!covers) continue;
     const minP = Math.max(0, toPaise(o.min_bill));
+    // combos are never "almost got": they apply when their whole set is on the bill (below), or not at all
+    if (isCombo(o)) { if (!(o.new_customers_only && !isNew) && grossP >= minP) ok.push(o); continue; }
     if (o.new_customers_only && !isNew) missed.push({ offer: o, reason: 'new' });
     else if (grossP < minP) missed.push({ offer: o, reason: 'min', short: (minP - grossP) / 100 });
     else ok.push(o);
   }
 
+  // Combos first: a full set of the combo's services (one line each, qty 1) together costs the combo price.
+  // The saving is shared across the set's lines in proportion to their price. A set is only taken when it saves
+  // more than the other offers would on those lines, so the customer always gets the better deal.
+  const lineOffers = ok.filter((o) => !isCombo(o));
+  const combo = lines.map(() => null); // { o, p }: the combo on this line and its share (paise)
+  if (enabled) {
+    const lineBest = lines.map((l) => Math.max(0, ...lineOffers.filter((o) => offerCovers(o, l, svc(l))).map((o) => savingP(o, l.unit_price, l.qty))));
+    const worth = (o) => (o.service_ids || []).reduce((a, id) => a + toPaise((servicesById[id] || {}).price || 0), 0) - toPaise(o.value);
+    const combos = ok.filter(isCombo).filter((o) => (o.service_ids || []).length >= 2).sort((a, b) => worth(b) - worth(a));
+    for (const o of combos) {
+      for (let guard = 0; guard < lines.length; guard++) {
+        const pick = [];
+        for (const id of o.service_ids) {
+          const i = lines.findIndex((l, j) => !combo[j] && !pick.includes(j) && l.item_type === 'service' && l.service_id === id && Number(l.qty) === 1);
+          if (i < 0) break;
+          pick.push(i);
+        }
+        if (pick.length !== o.service_ids.length) break;
+        const fullP = pick.reduce((a, i) => a + toPaise(lines[i].unit_price), 0);
+        const saveP = fullP - toPaise(o.value);
+        if (saveP <= 0 || saveP <= pick.reduce((a, i) => a + lineBest[i], 0)) break;
+        const parts = allocate(saveP, pick.map((i) => toPaise(lines[i].unit_price)));
+        pick.forEach((i, k) => { combo[i] = { o, p: parts[k] }; });
+      }
+    }
+  }
+
   // For each line: the offers that cover it, biggest saving first (ties: the order offers were made)
   const sav = lines.map(() => new Map());
   const opts = lines.map((l, i) => {
-    if (!enabled) return [];
-    const list = ok.filter((o) => offerCovers(o, l, svc(l))).map((o) => ({ o, s: savingP(o, l.unit_price, l.qty) })).filter((x) => x.s > 0);
+    if (!enabled || combo[i]) return [];
+    const list = lineOffers.filter((o) => offerCovers(o, l, svc(l))).map((o) => ({ o, s: savingP(o, l.unit_price, l.qty) })).filter((x) => x.s > 0);
     for (const x of list) sav[i].set(x.o, x.s);
     return list.sort((a, b) => b.s - a.s).map((x) => x.o);
   });
@@ -156,6 +193,7 @@ export function applyOffers(lines, offers, { now = istNow(), servicesById = {}, 
     const parts = allocate(cap, idx.map((i) => discP[i]));
     idx.forEach((i, k) => { discP[i] = parts[k]; });
   }
+  combo.forEach((c, i) => { if (c) { choice[i] = c.o; discP[i] = c.p; } });
   const out = lines.map((l, i) => {
     const o = discP[i] ? choice[i] : null;
     return { ...l, offer_id: o ? o.id : '', offer_name: o ? o.name : '', offer_discount: o ? discP[i] / 100 : 0 };
@@ -173,6 +211,19 @@ export function applyOffers(lines, offers, { now = istNow(), servicesById = {}, 
 
 // One plain sentence describing an offer, for the owner's list and the counter banner
 export function describeOffer(o, services = []) {
+  if (isCombo(o)) {
+    const byId = Object.fromEntries(services.map((s) => [s.id, s]));
+    const c = comboWorth(o, byId);
+    const names = c.services.map((s) => (s ? s.name : 'a removed service')).join(' + ');
+    const whenC = [];
+    if (o.starts_on && o.ends_on) whenC.push(o.starts_on === o.ends_on ? fmtDate(o.starts_on, false) : `${fmtDate(o.starts_on, false)} – ${fmtDate(o.ends_on, false)}`);
+    else if (o.starts_on) whenC.push('from ' + fmtDate(o.starts_on, false));
+    else if (o.ends_on) whenC.push('till ' + fmtDate(o.ends_on, false));
+    if (o.days && o.days.length && o.days.length < 7) whenC.push('every ' + o.days.map((d) => DOW[d - 1]).join(', '));
+    if (o.start_time || o.end_time) whenC.push(`${hhmm(o.start_time) || 'opening'}–${hhmm(o.end_time) || 'closing'}`);
+    if (o.new_customers_only) whenC.push('first visit only');
+    return [`Combo ${rupee(o.value)} (worth ${rupee(c.worth)}): ${names}`, whenC.join(' · ')].filter(Boolean).join(' · ');
+  }
   const what =
     o.kind === 'percent' ? `${Number(o.value)}% off` : o.kind === 'amount' ? `${rupee(o.value)} off each` : `special price ${rupee(o.value)}`;
   let on = 'all services';

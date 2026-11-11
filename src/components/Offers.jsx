@@ -4,7 +4,7 @@ import { db } from '../lib/db';
 import { useApp } from '../store';
 import { DOW, describeOffer, istNow, offerStatus } from '../lib/offers';
 import { SECTIONS, sectionLabel } from '../data/menu';
-import { istDay, addDays } from '../lib/format';
+import { istDay, addDays, rupee } from '../lib/format';
 import { Modal, Field, Seg, MoneyInput, SearchBox, Empty, Confirm } from './ui';
 
 const STATUS = {
@@ -30,6 +30,7 @@ function templates() {
     ['Weekly offer day', { name: 'Tuesday Treat 15% off', days: [2], kind: 'percent', value: '15' }],
     ['Happy hours', { name: 'Happy hours 10% off', start_time: '11:00', end_time: '15:00', days: [1, 2, 3, 4], kind: 'percent', value: '10' }],
     ['First visit', { name: 'First visit ₹200 off', new_customers_only: true, kind: 'amount', applies_to: 'all', value: '200', starts_on: t, ends_on: addDays(t, 30), max_discount: '200' }],
+    ['Combo', { name: 'Diwali Glow', kind: 'combo', applies_to: 'services', starts_on: t, ends_on: addDays(t, 14) }],
   ];
 }
 
@@ -122,10 +123,21 @@ function OfferModal({ offer, onClose, onSaved }) {
   const categories = [...new Set(active.map((s) => s.category))];
   const pickList = active.filter((s) => !q || (s.name + ' ' + s.category).toLowerCase().includes(q.toLowerCase()));
 
+  // A combo: its services in the order picked, what they cost together, and services that can't be in one
+  const combo = f.kind === 'combo';
+  const byId = useMemo(() => Object.fromEntries(services.map((s) => [s.id, s])), [services]);
+  const worth = f.service_ids.reduce((a, id) => a + (Number((byId[id] || {}).price) || 0), 0);
+  const noCombo = (s) => (s.variants && s.variants.length) || s.open_price || (s.extra_options && s.extra_options.choices);
+  const setKind = (v) => setF((x) => ({ ...x, kind: v, ...(v === 'combo' ? { applies_to: 'services', max_discount: '' } : {}) }));
+
   const save = async () => {
     const value = Number(f.value);
     if (!f.name.trim()) return setErr('Give the offer a name. It is printed on the bill.');
-    if (!(value > 0)) return setErr('Enter the offer value.');
+    if (!(value > 0)) return setErr(combo ? 'Enter the combo price.' : 'Enter the offer value.');
+    if (combo && f.service_ids.length < 2) return setErr('A combo needs at least 2 services.');
+    if (combo && f.service_ids.some((id) => !byId[id] || !byId[id].active)) return setErr('A service in this combo is not on the menu any more. Untick it.');
+    if (combo && f.service_ids.some((id) => noCombo(byId[id]))) return setErr('A service with sizes or its own price can\'t be in a combo. Untick it.');
+    if (combo && value >= worth) return setErr(`The combo price must be less than what the services cost together (${rupee(worth)}).`);
     if (f.kind === 'percent' && value > 100) return setErr('A percentage offer can be at most 100%.');
     if (f.starts_on && f.ends_on && f.ends_on < f.starts_on) return setErr('The last day is before the first day.');
     if (f.start_time && f.end_time && f.end_time <= f.start_time) return setErr('The end time must be after the start time.');
@@ -135,10 +147,10 @@ function OfferModal({ offer, onClose, onSaved }) {
     const row = {
       name: f.name.trim(), active: f.active, starts_on: f.starts_on || null, ends_on: f.ends_on || null,
       days: f.days.length && f.days.length < 7 ? [...f.days].sort() : null,
-      start_time: f.start_time || null, end_time: f.end_time || null, applies_to: f.applies_to,
-      sections: f.applies_to === 'section' ? f.sections : null, categories: f.applies_to === 'category' ? f.categories : null,
-      service_ids: f.applies_to === 'services' ? f.service_ids : null, include_products: f.applies_to === 'all' && f.include_products,
-      kind: f.kind, value, min_bill: Number(f.min_bill) || 0, max_discount: Number(f.max_discount) || null,
+      start_time: f.start_time || null, end_time: f.end_time || null, applies_to: combo ? 'services' : f.applies_to,
+      sections: !combo && f.applies_to === 'section' ? f.sections : null, categories: !combo && f.applies_to === 'category' ? f.categories : null,
+      service_ids: combo || f.applies_to === 'services' ? f.service_ids : null, include_products: !combo && f.applies_to === 'all' && f.include_products,
+      kind: f.kind, value, min_bill: Number(f.min_bill) || 0, max_discount: combo ? null : Number(f.max_discount) || null,
       new_customers_only: !!f.new_customers_only, note: f.note.trim() || null,
     };
     setBusy(true);
@@ -182,9 +194,9 @@ function OfferModal({ offer, onClose, onSaved }) {
 
         <div className="form-grid">
           <Field label="Offer type">
-            <Seg full options={[['percent', '% off'], ['amount', '₹ off each'], ['price', 'Special price']]} value={f.kind} onChange={(v) => set('kind', v)} />
+            <Seg full options={[['percent', '% off'], ['amount', '₹ off each'], ['price', 'Special price'], ['combo', 'Combo']]} value={f.kind} onChange={setKind} />
           </Field>
-          <Field label={f.kind === 'percent' ? 'Percent off' : f.kind === 'amount' ? 'Rupees off each service' : 'Special price for each service'}>
+          <Field label={combo ? `Combo price (all together${worth ? `, worth ${rupee(worth)}` : ''})` : f.kind === 'percent' ? 'Percent off' : f.kind === 'amount' ? 'Rupees off each service' : 'Special price for each service'}>
             {f.kind === 'percent' ? (
               <input className="input" id="of-value" inputMode="decimal" value={f.value} onChange={(e) => set('value', e.target.value.replace(/[^\d.]/g, ''))} placeholder="20" />
             ) : (
@@ -193,7 +205,35 @@ function OfferModal({ offer, onClose, onSaved }) {
           </Field>
         </div>
 
-        <div className="stack tight">
+        {combo && (
+          <div className="stack tight" id="combo-services">
+            <div className="sec-title">Services in the combo</div>
+            <p className="small muted" style={{ margin: 0 }}>
+              Tick each service once. At the counter the combo shows in New bill → Combos while it runs; one tap adds these services,
+              each with its own staff member, and the bill comes to the combo price. Also applies by itself if the services are added one by one.
+            </p>
+            {f.service_ids.length > 0 && (
+              <div className="sub-card small">
+                {f.service_ids.map((id) => <div key={id}>{byId[id] ? `${byId[id].name} · ${rupee(byId[id].price)}` : 'A removed service'}</div>)}
+                <div className="strong" style={{ marginTop: 4 }}>
+                  Worth {rupee(worth)}{Number(f.value) > 0 && Number(f.value) < worth ? ` · combo ${rupee(f.value)} · saves ${rupee(worth - Number(f.value))}` : ''}
+                </div>
+              </div>
+            )}
+            <SearchBox value={q} onChange={setQ} placeholder="Search services, e.g. beard, d-tan, eyebrows" />
+            <div className="pick-list">
+              {pickList.map((s) => (
+                <label key={s.id} className="check pick">
+                  <input type="checkbox" disabled={!!noCombo(s) && !f.service_ids.includes(s.id)} checked={f.service_ids.includes(s.id)} onChange={() => flip('service_ids', s.id)} />
+                  <span className="grow">{s.name}</span>
+                  <span className="tiny muted">{noCombo(s) ? 'has sizes or its own price' : `${rupee(s.price)} · ${s.category}`}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {!combo && <div className="stack tight">
           <div className="sec-title">Which services</div>
           <Seg full options={[['all', 'Everything'], ['section', 'Tab'], ['category', 'Category'], ['services', 'Pick services']]} value={f.applies_to} onChange={(v) => set('applies_to', v)} />
           {f.applies_to === 'all' && (
@@ -219,7 +259,7 @@ function OfferModal({ offer, onClose, onSaved }) {
               <span className="small muted">{f.service_ids.length} chosen</span>
             </div>
           )}
-        </div>
+        </div>}
 
         <div className="stack tight">
           <div className="sec-title">When</div>
@@ -239,7 +279,7 @@ function OfferModal({ offer, onClose, onSaved }) {
           <div className="sec-title">Conditions (optional)</div>
           <div className="form-grid">
             <Field label="Only on bills of at least"><MoneyInput id="of-min" value={f.min_bill} onChange={(v) => set('min_bill', v)} placeholder="Any bill" /></Field>
-            <Field label="Most it can take off one bill"><MoneyInput id="of-cap" value={f.max_discount} onChange={(v) => set('max_discount', v)} placeholder="No limit" /></Field>
+            {!combo && <Field label="Most it can take off one bill"><MoneyInput id="of-cap" value={f.max_discount} onChange={(v) => set('max_discount', v)} placeholder="No limit" /></Field>}
           </div>
           <label className="check"><input type="checkbox" checked={f.new_customers_only} onChange={(e) => set('new_customers_only', e.target.checked)} /> Only for a customer's first visit</label>
           <label className="check"><input type="checkbox" checked={f.active} onChange={(e) => set('active', e.target.checked)} /> Offer is switched on</label>

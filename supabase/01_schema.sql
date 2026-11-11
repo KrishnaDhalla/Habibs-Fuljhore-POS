@@ -662,6 +662,10 @@ declare
   v_max     numeric;
   v_ok      boolean;
   v_used    jsonb := '{}'::jsonb;   -- offer id → offer discount allowed so far (for "up to ₹X" caps)
+  v_combo   jsonb := '{}'::jsonb;   -- combo id → {"n": {service id: how many}, "sum": the lines at their prices}
+  v_sets    numeric;
+  v_full    boolean;
+  v_allow   numeric;
   v_missing text[] := '{}';
   v_low     text[] := '{}';
   k         text;
@@ -711,7 +715,15 @@ begin
                      or (not v_offline and (offer_live_at(o, v_t - interval '5 minutes', true) or offer_live_at(o, v_t + interval '5 minutes', true))))
                 and v_sub >= coalesce(o.min_bill, 0)
                 and (not o.new_customers_only or p_new);
-        if v_ok then v_max := least(v_off, offer_line_saving(o, v_price, v_qty)); end if;
+        if v_ok and o.kind = 'combo' then
+          -- a combo's line: at most the line itself here; the whole set is checked after the loop
+          v_max := least(v_off, v_price * v_qty);
+          v_combo := jsonb_set(v_combo, array[o.id::text], jsonb_build_object(
+            'n', coalesce(v_combo #> array[o.id::text, 'n'], '{}'::jsonb)
+                 || jsonb_build_object(s.id::text, coalesce((v_combo #>> array[o.id::text, 'n', s.id::text])::numeric, 0) + v_qty),
+            'sum', coalesce((v_combo #>> array[o.id::text, 'sum'])::numeric, 0) + v_price * v_qty));
+        elsif v_ok then v_max := least(v_off, offer_line_saving(o, v_price, v_qty));
+        end if;
         v_used := jsonb_set(v_used, array[o.id::text], to_jsonb(coalesce((v_used ->> o.id::text)::numeric, 0) + v_max));
       end if;
       if v_off > v_max then
@@ -719,6 +731,20 @@ begin
         v_low := v_low || (coalesce(nullif(it->>'offer_name', ''), 'offer') || ' ₹' || trim_scale(v_off) || ' on ' || coalesce(it->>'name', 'a line')
                            || case when o.id is null then ' (offer not found)' else ', allowed ₹' || trim_scale(v_max) end);
       end if;
+    end if;
+  end loop;
+  -- Combos: whole sets only (each of its services the same number of times), and together no more off than
+  -- (the set's lines at their prices) − (the combo price × the number of sets)
+  for k in select jsonb_object_keys(v_combo) loop
+    select * into o from offers where id = k::uuid;
+    select min(coalesce((v_combo #>> array[k, 'n', x::text])::numeric, 0)), bool_and(coalesce((v_combo #>> array[k, 'n', x::text])::numeric, 0) = (v_combo #>> array[k, 'n', (o.service_ids)[1]::text])::numeric)
+      into v_sets, v_full from unnest(o.service_ids) x;
+    v_full := coalesce(v_full, false) and coalesce(v_sets, 0) >= 1
+              and (select count(*) from jsonb_object_keys(v_combo #> array[k, 'n'])) = (select count(distinct x) from unnest(o.service_ids) x);
+    v_allow := case when v_full then greatest(0, (v_combo #>> array[k, 'sum'])::numeric - v_sets * o.value) else 0 end;
+    if (v_used ->> k)::numeric > v_allow then
+      hidden := hidden + (v_used ->> k)::numeric - v_allow;
+      v_low := v_low || (o.name || case when v_full then ' combo: more off than the combo price allows' else ' combo: not the whole set on the bill' end);
     end if;
   end loop;
   -- "Up to ₹X off": the whole bill can't get more than the cap from one offer
@@ -1662,6 +1688,14 @@ alter table offers add column if not exists web_tag    text;   -- "WEDDING SEASO
 alter table offers add column if not exists image      text;
 alter table offers add column if not exists web_sort   int not null default 0;
 alter table offers add column if not exists updated_at timestamptz not null default now();
+-- Combos (November 2026): a set of services for one price, e.g. "Diwali Glow ₹1,799" = facial + D-tan + eyebrows.
+-- kind 'combo', the services in service_ids (2 or more), the combo price in value. The counter adds them from the
+-- Combos tab; the price is shared across the set's lines as the offer discount (applyOffers() in src/lib/offers.js),
+-- and bill_menu_check() checks that the set is complete and the discount is no more than the combo allows.
+alter table offers drop constraint if exists offers_kind_check;
+alter table offers add constraint offers_kind_check check (kind in ('percent', 'amount', 'price', 'combo'));
+alter table offers drop constraint if exists offers_combo_check;
+alter table offers add constraint offers_combo_check check (kind <> 'combo' or (applies_to = 'services' and cardinality(service_ids) >= 2));
 
 create or replace function touch_updated_at() returns trigger
 language plpgsql as $$

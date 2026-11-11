@@ -4,7 +4,7 @@ import QRCode from 'qrcode';
 import { db } from '../lib/db';
 import { useApp } from '../store';
 import { calcBill, checkBill } from '../lib/calc';
-import { applyOffers, istNow, offerLive, offerCovers, offerSaving } from '../lib/offers';
+import { applyOffers, istNow, offerLive, offerCovers, offerSaving, isCombo, comboWorth } from '../lib/offers';
 import { SIZE_HINT, SECTIONS, sectionLabel } from '../data/menu';
 import { rupee, round2, cleanPhone, validPhone, fmtPhone, fmtDate, daysSince, uid, istDay, addDays, dayRangeISO } from '../lib/format';
 import { Modal, Field, SearchBox, MoneyInput, cleanMoney } from '../components/ui';
@@ -37,6 +37,33 @@ const toTop = () => {
   const m = document.querySelector('.main');
   if (m) m.scrollTo(0, 0);
 };
+
+// The Combos tab: the combos running now (Settings → Offers, type Combo). A tap adds all its services; the combo
+// price comes off by itself (applyOffers). A combo with a service no longer on the menu can't be added.
+function ComboTiles({ combos, onCombo }) {
+  return (
+    <div>
+      <div className="cat-title">Combos running now</div>
+      <div className="tiles combo-tiles">
+        {combos.map((c) => (
+          <button key={c.o.id} className="tile combo-tile" data-combo={c.o.name} disabled={c.missing} onClick={() => onCombo(c)}>
+            <span className="n">{c.o.name}</span>
+            <span className="small muted">{c.services.map((s) => (s ? s.name : 'a removed service')).join(' + ')}</span>
+            <span className="p">
+              <b className="combo-price">{rupee(c.o.value)}</b>{' '}
+              {c.worth > Number(c.o.value) && <><s>{rupee(c.worth)}</s> · save {rupee(round2(c.worth - Number(c.o.value)))}</>}
+            </span>
+            {(c.missing || Number(c.o.min_bill) > 0 || c.o.new_customers_only) && (
+              <span className="tiny warn-text">
+                {c.missing ? 'A service in it is not on the menu any more' : [Number(c.o.min_bill) > 0 && `Bills over ${rupee(c.o.min_bill)}`, c.o.new_customers_only && 'First visit only'].filter(Boolean).join(' · ')}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // The service tiles. Redrawn only when the menu, the search or the bill items change.
 const MenuTiles = memo(function MenuTiles({ shown, inCart, q, onService, onProduct, tags = {} }) {
@@ -244,6 +271,7 @@ export default function Billing({ hasBanner }) {
       : l))
     : ls);
   const liveOffers = useMemo(() => (offers || []).filter((o) => offerLive(o, now)), [offers, now]);
+  const liveCombos = useMemo(() => liveOffers.filter(isCombo).map((o) => ({ o, ...comboWorth(o, servicesById) })), [liveOffers, servicesById]);
   // A staff member's number billed for the first time: their name is filled in
   useEffect(() => {
     if (staffFor && lookup === 'new' && !newCust.name) setNewCust((c) => ({ ...c, name: staffFor.name }));
@@ -318,6 +346,13 @@ export default function Billing({ hasBanner }) {
     });
     setPicker(null);
   };
+  // A combo: all its services at their menu prices; the combo price comes off as the offer on those lines
+  const addCombo = (c) => {
+    if (c.missing) return toast('A service in this combo is not on the menu any more. Change the combo in Settings → Offers.', 'bad');
+    for (const s of c.services) addService(s, Number(s.price));
+    if (staffFor) toast(`${c.o.name}: added. A staff member's own bill has staff prices, not the combo price.`);
+    else toast(`${c.o.name} added: ${c.services.length} services for ${rupee(c.o.value)}. Choose who does each one.`, 'ok');
+  };
   const tapProduct = (p) => {
     const existing = lines.find((l) => l.product_id === p.id);
     if (existing) return setLines((ls) => ls.map((l) => (l === existing ? { ...l, qty: l.qty + 1 } : l)));
@@ -349,8 +384,9 @@ export default function Billing({ hasBanner }) {
   // Only tabs with services in billing (a tab the owner empties disappears; one they fill appears).
   // "Popular" needs some billing history; until then (or for a tab that has gone) the first tab shows.
   const usedTabs = SECTIONS.filter((x) => activeServices.some((s) => s.section === x));
-  const sectionTabs = [...(popular.length ? ['Popular'] : []), ...(usedTabs.length ? usedTabs : ['Hair']), ...(retail.length ? ['Products'] : [])];
-  const activeSection = sectionTabs.includes(section) ? section : sectionTabs[popular.length ? 1 : 0];
+  // "Combos" shows while a combo is running (Settings → Offers)
+  const sectionTabs = [...(popular.length ? ['Popular'] : []), ...(liveCombos.length ? ['Combos'] : []), ...(usedTabs.length ? usedTabs : ['Hair']), ...(retail.length ? ['Products'] : [])];
+  const activeSection = sectionTabs.includes(section) ? section : (sectionTabs.find((x) => x !== 'Popular' && x !== 'Combos') || sectionTabs[0]);
   const groupSection = (sec) => {
     const groups = [];
     for (const s of activeServices.filter((x) => x.section === sec)) {
@@ -530,7 +566,9 @@ export default function Billing({ hasBanner }) {
             <span className="small"><b>Offers on now:</b> {liveOffers.map((o) => o.name).join(' · ')}</span>
           </div>
         )}
-        <MenuTiles shown={shown} inCart={inCart} q={dq} onService={onService} onProduct={onProduct} tags={tileTags} />
+        {activeSection === 'Combos' && !dq
+          ? <ComboTiles combos={liveCombos} onCombo={addCombo} />
+          : <MenuTiles shown={shown} inCart={inCart} q={dq} onService={onService} onProduct={onProduct} tags={tileTags} />}
 
         <div className="mobile-switch">
           <button className="btn primary block lg" onClick={() => { setShowBill(true); toTop(); }}>

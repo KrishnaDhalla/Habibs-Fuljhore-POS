@@ -915,6 +915,46 @@ for (const [t, want] of fyCases) {
   check('nor a zero one', !!(await C(`insert into stock_moves (product_id, type, qty) values ($1, 'in', 0)`, [prod.id])).error);
   check('stock in still works', !(await C(`insert into stock_moves (product_id, type, qty) values ($1, 'in', 2)`, [prod.id])).error);
   check('stock = sum of its moves', Number((await q(`select stock from products where id = $1`, [prod.id]))[0].stock) === Number((await q(`select sum(qty) s from stock_moves where product_id = $1`, [prod.id]))[0].s));
+
+  // combos (November 2026): a set of services for one price, e.g. "Bhai Phonta Grooming ₹899" (worth ₹1,247)
+  {
+    const cut = await byName("Men's Haircut & Styling"), beard = await byName('Beard Trim / Shape'), dtan = await byName('O3+ D-Tan Face & Neck');
+    check('combo: the flyer\'s services cost ₹1,247 together', Number(cut.price) + Number(beard.price) + Number(dtan.price) === 1247);
+    check('combo: needs at least 2 services', !!(await tryq(`insert into offers (name, kind, applies_to, service_ids, value) values ('One', 'combo', 'services', $1, 100)`, [[cut.id]])).error);
+    check('combo: only as "these services"', !!(await tryq(`insert into offers (name, kind, applies_to, service_ids, value) values ('All', 'combo', 'all', $1, 100)`, [[cut.id, beard.id]])).error);
+    const [bp] = await q(`insert into offers (name, kind, applies_to, service_ids, value) values ('Bhai Phonta Grooming', 'combo', 'services', $1, 899) returning *`, [[cut.id, beard.id, dtan.id]]);
+    const allSvc = Object.fromEntries((await q(`select * from services`)).map((s) => [s.id, s]));
+    const L = (svc) => ({ item_type: 'service', service_id: svc.id, name: svc.name, category: svc.category, unit_price: Number(svc.price), qty: 1 });
+    const apply = (lines, list = [bp]) => applyOffers(lines, list, { servicesById: allSvc }).lines;
+    const sum = (ls) => Math.round(ls.reduce((a, l) => a + l.offer_discount, 0) * 100) / 100;
+    // the app: the three services → ₹348 off, shared by price, on the combo
+    const a1 = apply([L(cut), L(beard), L(dtan)]);
+    check('combo (app): the set comes to the combo price (₹348 off), each line on the combo', sum(a1) === 348 && a1.every((l) => l.offer_id === bp.id && l.offer_name === 'Bhai Phonta Grooming'), JSON.stringify(a1.map((l) => l.offer_discount)));
+    check('combo (app): shared in proportion to the prices (the dearest line gets the most)', a1[2].offer_discount > a1[0].offer_discount && a1[0].offer_discount > a1[1].offer_discount);
+    check('combo (app): in any order, with other services on the bill', sum(apply([L(dtan), L(fixed), L(beard), L(cut)])) === 348);
+    check('combo (app): not the whole set → nothing off', sum(apply([L(cut), L(beard)])) === 0);
+    check('combo (app): two sets (two brothers) → twice', sum(apply([L(cut), L(beard), L(dtan), L(cut), L(beard), L(dtan)])) === 696);
+    check('combo (app): one and a half sets → once', sum(apply([L(cut), L(beard), L(dtan), L(cut), L(beard)])) === 348);
+    const half = { id: randomUUID(), name: 'Half off all', active: true, applies_to: 'all', kind: 'percent', value: 50 };
+    const a2 = apply([L(cut), L(beard), L(dtan)], [bp, half]);
+    check('combo (app): a bigger offer on those lines wins instead (the customer gets the better deal)', a2.every((l) => l.offer_id === half.id) && sum(a2) === 623.5, JSON.stringify(a2.map((l) => [l.offer_name, l.offer_discount])));
+    const small = { id: randomUUID(), name: '10% off all', active: true, applies_to: 'all', kind: 'percent', value: 10 };
+    const a3 = apply([L(cut), L(beard), L(dtan), L(fixed)], [bp, small]);
+    check('combo (app): beats a smaller offer; that offer still applies to the other lines', a3.slice(0, 3).every((l) => l.offer_id === bp.id) && a3[3].offer_id === small.id, JSON.stringify(a3.map((l) => l.offer_name)));
+    check('combo (app): switched off or not on today → nothing', sum(apply([L(cut), L(beard), L(dtan)], [{ ...bp, active: false }])) === 0 && sum(apply([L(cut), L(beard), L(dtan)], [{ ...bp, ends_on: '2020-01-01' }])) === 0);
+    // the database: what the app works out saves clean; anything else is counted as discount
+    const withOffers = (ls) => ls.map(({ qty, ...l }) => l);
+    await clean('combo: the set at the combo price, as the app works it out', make(withOffers(a1)));
+    await clean('combo: two sets', make(withOffers(apply([L(cut), L(beard), L(dtan), L(cut), L(beard), L(dtan)]))));
+    const more = a1.map((l, i) => ({ ...l, offer_discount: i === 2 ? l.offer_discount + 150 : l.offer_discount }));
+    await noted('combo: ₹150 more off than the combo price allows', make(withOffers(more)), /CHECK: ₹150.*Bhai Phonta Grooming combo: more off than the combo price allows/);
+    await refused('combo: claimed without the whole set (no D-tan: 28% off a ₹548 bill)', make(withOffers(a1.slice(0, 2))));
+    await noted('combo: without the whole set on a bigger bill (under the limit): counted, with the reason', make(withOffers([...a1.slice(0, 2), { ...L(fixed), offer_id: '', offer_name: '', offer_discount: 0 }])), /Bhai Phonta Grooming combo: not the whole set on the bill/);
+    await refused('combo: claimed on a service that is not in it', make([S(fixed, 1500, { offer_id: bp.id, offer_name: bp.name, offer_discount: 600 })]));
+    await q(`update offers set active = false where id = $1`, [bp.id]);
+    await refused('combo: switched off (online): ₹348 is 28% off, over the limit', make(withOffers(a1)));
+    await q(`delete from offers where id = $1`, [bp.id]);
+  }
 }
 
 // ---------- 13. past bills (owner only) and discounts on single lines ----------
