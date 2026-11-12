@@ -24,7 +24,7 @@ export function createSupaDb(url, key) {
   };
 
   // The unique column of each table that has no "id" (see 01_schema.sql); every other table has an id
-  const KEY_OF = { settings: 'key', counters: 'key', staff_faces: 'staff_id', unit_ends: 'move_id', app_roles: 'user_id', login_requests: 'session_id', owner_secrets: 'user_id', wa_chats: 'phone' };
+  const KEY_OF = { settings: 'key', counters: 'key', staff_faces: 'staff_id', unit_ends: 'move_id', app_roles: 'user_id', login_requests: 'session_id', owner_secrets: 'user_id' };
   function build(t, o) {
     let q = sb.from(t).select(o.select || '*');
     for (const [k, v] of Object.entries(o.eq || {})) q = q.eq(k, v);

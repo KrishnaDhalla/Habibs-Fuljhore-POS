@@ -67,7 +67,7 @@ function SalonSettings() {
   };
   const keys = ['salon_name', 'branch', 'address', 'phone', 'instagram', 'gstin', 'prices_include_gst', 'bill_prefix', 'bill_footer', 'max_discount_pct', 'upi_id', 'receipt_width', 'opening_hours', 'whatsapp', 'maps_url', 'paid_offs_per_month',
     'leave_blocked_days', 'leave_notice_days', 'leave_one_at_a_time', 'leave_alert_days', 'staff_free_sections', 'staff_discount_pct', 'wa_bills_on', 'wa_slips_on',
-    'wa_feedback_on', 'wa_feedback_after_hours', 'google_review_url', 'wa_review_all', 'wa_reminders_on', 'wa_remind_hours', 'wa_winback_on', 'wa_winback_days', 'wa_winback_text', 'wa_winback_per_day', 'wa_bot_on', 'cash_tolerance', 'due_max_counter',
+    'wa_feedback_on', 'wa_feedback_after_hours', 'google_review_url', 'wa_review_all', 'wa_reminders_on', 'wa_remind_hours', 'wa_winback_on', 'wa_winback_days', 'wa_winback_text', 'wa_winback_per_day', 'cash_tolerance', 'due_max_counter',
     'loyalty_on', 'loyalty_earn_pct', 'loyalty_min_use', 'loyalty_max_use_pct', 'loyalty_expiry_months', 'loyalty_products'];
 
   const save = async () => {
@@ -88,7 +88,7 @@ function SalonSettings() {
       wa_feedback_on: f.wa_feedback_on === true, wa_feedback_after_hours: Math.round(num('wa_feedback_after_hours', 2, 47)), google_review_url: String(f.google_review_url || '').trim(),
       wa_review_all: f.wa_review_all !== false, wa_reminders_on: f.wa_reminders_on === true, wa_remind_hours: Math.max(1, Math.round(num('wa_remind_hours', 3, 48))),
       wa_winback_on: f.wa_winback_on === true, wa_winback_days: Math.max(14, Math.round(num('wa_winback_days', 45, 300))),
-      wa_winback_text: String(f.wa_winback_text || '').trim().slice(0, 160) || 'We would love to see you again.', wa_winback_per_day: Math.round(num('wa_winback_per_day', 20, 200)), wa_bot_on: f.wa_bot_on === true,
+      wa_winback_text: String(f.wa_winback_text || '').trim().slice(0, 160) || 'We would love to see you again.', wa_winback_per_day: Math.round(num('wa_winback_per_day', 20, 200)),
       cash_tolerance: Math.round(num('cash_tolerance', 10, 1000)), due_max_counter: Math.round(num('due_max_counter', 200, 100000)) };
     if (next.google_review_url && !/^https:\/\/\S+$/.test(next.google_review_url)) { setErr('The Google review link must start with https://'); return; }
     try {
@@ -163,9 +163,6 @@ function SalonSettings() {
           </Field>
           <Field label="Send the salary slip to staff when salary is marked paid" hint="Staff → Payroll → Mark paid: the full breakup (days, day rate, commission, advances, net pay) goes as a picture to that person's own mobile number. Needs the salary_slip template (README).">
             <Seg full options={[[false, 'Off'], [true, 'On']]} value={f.wa_slips_on !== false} onChange={(v) => setF({ ...f, wa_slips_on: v })} />
-          </Field>
-          <Field label="Booking bot: answer customers who message the salon" hint="Buttons: Book an appointment · Prices & offers · Talk to us. Bookings arrive in Appointments → Requests (WhatsApp); confirming one sends the customer the confirmation. Prices and Talk to us are kept as enquiries, and the owners get a Telegram message. Free: the customer wrote first.">
-            <Seg full options={[[false, 'Off'], [true, 'On']]} value={f.wa_bot_on === true} onChange={(v) => setF({ ...f, wa_bot_on: v })} />
           </Field>
           <div className="row wrap" style={{ gap: 10 }}>
             <button type="button" className="btn line sm" id="wa-check" onClick={checkWa}>Check the WhatsApp setup</button>

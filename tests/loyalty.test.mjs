@@ -382,7 +382,7 @@ const before = (await q(`select (select count(*) from loyalty_points) a, (select
 await db.exec(schema);
 const after = (await q(`select (select count(*) from loyalty_points) a, (select sum(points) from customers) b`))[0];
 check('schema re-run keeps the points', JSON.stringify(before) === JSON.stringify(after));
-check('settings: 46 in all', (await q(`select count(*)::int n from settings`))[0].n === 46);
+check('settings: 45 in all', (await q(`select count(*)::int n from settings`))[0].n === 45);
 
 const bad = Object.entries(fails);
 console.log(`${checks.toLocaleString()} loyalty checks, ${bad.reduce((a, [, v]) => a + v.count, 0)} failed`);

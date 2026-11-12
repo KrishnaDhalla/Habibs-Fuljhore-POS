@@ -78,7 +78,7 @@ export const DEFAULT_SETTINGS = {
   leave_alert_days: [7, 3, 1],
   wa_bills_on: false, wa_slips_on: true,
   wa_feedback_on: false, wa_feedback_after_hours: 2, google_review_url: '', wa_review_all: true,
-  wa_reminders_on: false, wa_remind_hours: 3, wa_bot_on: false,
+  wa_reminders_on: false, wa_remind_hours: 3,
   wa_winback_on: false, wa_winback_days: 45, wa_winback_text: 'We would love to see you again.', wa_winback_per_day: 20,
   cash_tolerance: 10, due_max_counter: 200, expense_categories: DEFAULT_CATEGORIES,
   loyalty_on: true,
@@ -1012,8 +1012,6 @@ export function createLocalDb() {
     // marks it delivered a moment later, to show how the screens work.
     async whatsapp(body) {
       if (body.action === 'status') return { configured: false, demo: true, missing: [], template: 'bill_receipt', lang: 'en' };
-      // the booking bot lives in the Edge Function only: the demo has no WhatsApp chats, so the app's own button is used
-      if (body.action === 'booking_confirm') return { ok: false, demo: true, window: true, error: 'Demo: WhatsApp is not connected.' };
       if (body.action === 'auto') {
         // the demo sends nothing: it records what would go, marks reminders, and "answers" a feedback request
         const due = dueMessages({ bills: T('bills'), bookings: T('bookings'), booking_items: T('booking_items'), customers: T('customers'), staff: T('staff'), wa_messages: T('wa_messages') }, settingsObj(), body.now ? new Date(body.now) : new Date());

@@ -441,48 +441,6 @@ const beard = (await q(`select id from services where name = 'Beard Trim / Shape
   check('the website key cannot change bookings', (await anonQ(`update bookings set status = 'cancelled' returning id`)).length === 0 || !!(await anonQ(`update bookings set status = 'cancelled' returning id`)).error);
 }
 
-// ---------- 5d. the WhatsApp booking bot (wa_book, wa_enquiry: only the whatsapp function, service key) ----------
-{
-  const sv = async (n) => (await q(`select * from services where name = $1`, [n]))[0];
-  const gcw = await sv("Women's Global Colour"), cutS = await sv("Men's Haircut & Styling");
-  const WB = (p) => tryq(`select wa_book($1) r`, [JSON.stringify(p)]);
-  const WE = (p) => tryq(`select wa_enquiry($1) r`, [JSON.stringify(p)]);
-  const day = plusDays(2);
-  // they asked for prices first
-  const e0 = await WE({ phone: '919831155501', name: 'Payel', message: 'Asked for prices & offers on WhatsApp' });
-  check('bot: an enquiry from "Prices & offers"', !e0.error && e0[0].r.fresh === true, JSON.stringify(e0));
-  const e1 = await WE({ phone: '9831155501', message: 'Do you do keratin for boys?' });
-  const er = (await q(`select * from enquiries where phone = '9831155501'`));
-  check('…what they write next is added to the same enquiry', !e1.error && e1[0].r.fresh === false && er.length === 1 && /prices/.test(er[0].message) && /keratin for boys/.test(er[0].message) && er[0].source === 'whatsapp' && er[0].created_by === 'whatsapp', JSON.stringify(er));
-  await WE({ phone: '9831155501', message: 'Do you do keratin for boys?' });
-  check('…the same words twice are kept once', (await q(`select message from enquiries where phone = '9831155501'`))[0].message.split('keratin').length === 2);
-  const r1 = await WB({ phone: '919831155501', name: 'Payel Das', date: day, time: '17:00', items: [{ service_id: gcw.id, option: 'M' }, { service_id: cutS.id }] });
-  check('bot: a booking request, with a code', !r1.error && /^[0-9A-F]{6}$/.test(r1[0].r.ref) && r1[0].r.items.length === 2, JSON.stringify(r1));
-  const b = (await q(`select * from bookings where id = $1`, [r1[0].r.id]))[0];
-  check('…in Appointments → Requests: WhatsApp, the day and time asked, 10-digit phone, how long', b.status === 'requested' && b.source === 'whatsapp' && b.created_by === 'whatsapp' && b.want_time === '17:00'
-    && b.phone === '9831155501' && !b.slot_at && b.duration_min >= 30, JSON.stringify(b));
-  const its = await q(`select * from booking_items where booking_id = $1 order by name desc`, [b.id]);
-  check('…prices from the menu (M size)', Number(its[0].price) === 3499 && its[0].option_label === 'M', JSON.stringify(its));
-  check('…the enquiry before it is now booked, and they point at each other', b.enquiry_id === er[0].id && (await q(`select status, booking_id from enquiries where id = $1`, [er[0].id]))[0].booking_id === b.id
-    && (await q(`select status from enquiries where id = $1`, [er[0].id]))[0].status === 'booked');
-  check('…the counter sees it', (await clerkQ(`select id from bookings where id = $1`, [b.id])).length === 1);
-  const base = { phone: '9831155502', name: 'Test', date: day, time: '11:00', items: [{ service_id: cutS.id }] };
-  const no = async (p, re, name) => { const r = await WB(p); check(name, re.test(r.error || ''), JSON.stringify(r)); };
-  await no({ ...base, phone: '123' }, /Bad phone/, 'bot booking: bad phone refused');
-  await no({ ...base, name: '' }, /Name/, 'bot booking: name needed');
-  await no({ ...base, date: plusDays(-1) }, /Bad date/, 'bot booking: a past day refused');
-  await no({ ...base, date: plusDays(40) }, /Bad date/, 'bot booking: more than 30 days ahead refused');
-  await no({ ...base, time: '5pm' }, /Bad time/, 'bot booking: a time must be HH:MM');
-  await no({ ...base, items: Array(6).fill({ service_id: cutS.id }) }, /1 to 5/, 'bot booking: 5 services at most');
-  await no({ ...base, items: [{ service_id: (await sv('Beard Trim / Shape')).id }] }, /not bookable/, 'bot booking: a service hidden from online booking refused');
-  check('…a refused booking leaves nothing behind', (await q(`select count(*)::int n from bookings where phone = '9831155502'`))[0].n === 0);
-  for (let i = 0; i < 3; i++) await WB(base);
-  await no(base, /Too many/, 'bot booking: 3 a day from one number');
-  check('the app and the website cannot call the bot\'s functions', /permission denied/.test((await anonQ(`select wa_book($1)`, [JSON.stringify(base)])).error || '')
-    && /permission denied/.test((await clerkQ(`select wa_enquiry($1)`, [JSON.stringify(base)])).error || ''));
-  check('the bot\'s chats are not readable by the app', (await clerkQ(`select * from wa_chats`)).length === 0 || !!(await clerkQ(`select * from wa_chats`)).error);
-}
-
 // ---------- 5b. CSV exports can't carry spreadsheet formulas ----------
 {
   const { toCSV } = await import('../src/lib/format.js');

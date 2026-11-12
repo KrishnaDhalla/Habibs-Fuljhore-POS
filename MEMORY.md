@@ -9,61 +9,36 @@ done in Supabase for it to work. Keep this file up to date when something change
 
 ---
 
-## 7. WhatsApp booking bot, and the bill template made plainly "Utility"
+## 7. Bill template made plainly "Utility" (and a WhatsApp booking bot, tried and dropped)
 
-**Branch:** `test` · **Date:** 12 Nov 2026
+**Branch:** `test` · **Date:** 12–13 Nov 2026
 
 ### Why
-- Customers who message the salon's WhatsApp number should be able to book there, and every booking or question
-  should be **recorded in the POS** (the data). The salon number is on the WhatsApp API, so nobody can answer it in
-  the WhatsApp app. The owner chose: a menu bot, the receptionist confirms, **no chat inbox in the POS**.
-- Meta filed `bill_receipt` as Marketing (wording "thank you for visiting", "₹270 off your next visit"). The
-  template text and the points line are now plain account facts.
+- Meta filed `bill_receipt` as Marketing (wording "thank you for visiting", "₹270 off your next visit"). Marketing
+  costs ~7× more and Meta limits how many reach Indian numbers. The template text and the points line are now plain
+  account facts.
+- A WhatsApp booking bot (buttons → booking in Appointments → Requests) was built on 12 Nov and **removed on 13 Nov**
+  at the owner's request (overkill). Bookings from WhatsApp are still added by hand in Appointments (source WhatsApp).
 
 ### What it does
-- **The bot** (Settings → Salon & bill → WhatsApp bills → "Booking bot", off by default, setting `wa_bot_on`;
-  46 settings now). Any message → "Hi Riya! Welcome to Habibs Hair & Beauty Fuljhore" with 3 buttons:
-  - **Book appointment**: section → category → service (prices from the menu) → size if it has sizes (or "Not
-    sure") → Add another (up to 5) or **Choose day & time** → day (next 8 open days) → time (on the hour, opening
-    to an hour before closing, from the `opening_hours` setting; today only from an hour from now) → name (the
-    customer's name in the POS, else "Is the booking for {WhatsApp name}?", else they type it) → summary →
-    **Send request**. Only services that can be booked on the website (`show_on_website`, `book_online`).
-  - The request lands in **Appointments → Requests** (source WhatsApp, `created_by = 'whatsapp'`), the customer gets
-    "Request sent ✅ (ref …)", the owners get a Telegram message. Limit 3 a number a day.
-  - When the counter **confirms** it (picks the time), the confirmation goes from the salon's number by itself
-    ("Confirmed ✅ … Ref … address … call us to change"), and it is marked "confirmation sent". If the customer last
-    wrote more than ~24 hours ago (WhatsApp's free reply window), the old "Open WhatsApp" box comes instead.
-  - **Prices & offers**: today's website offers and "from ₹" prices by category; kept as an enquiry.
-  - **Talk to us**: "type your question, someone will call you back"; an enquiry, a Telegram message to the
-    owners; the bot stays quiet 12 hours (their messages go to Telegram and into the enquiry). **MENU** brings it back.
-  - A reply to a bill, a photo or voice note: to the owners on Telegram and into the enquiry, no bot answer.
-  - An enquiry (Prices / Talk to us / their words) is one per customer a week; a booking after it marks it booked.
-  - Unfinished steps are forgotten after 3 hours. Everything is inside WhatsApp's 24-hour window: no charge.
-- With the bot **off**: as before (messages to the owners on Telegram); the time of their last message is still kept.
-- The Telegram text no longer says "reply in the WhatsApp Business app" (impossible on an API number): "Call them,
-  or WhatsApp them from your phone".
-- **Bill template**: new body (README 2e step 4) and `{{4}}` = "Loyalty points: 120 added, balance 270." /
-  "Loyalty points: 100 used on this bill, balance 270." / "Please keep it for your records."
+- **Bill template** (README 2e step 4): body `Hi {{1}}, here is your bill {{2}} from Habibs Hair & Beauty Fuljhore for
+  ₹{{3}}. The bill is in the picture above. {{4}} Reply to this message if anything on the bill is not right.`
+  `{{4}}` = "Loyalty points: 120 added, balance 270." / "Loyalty points: 100 used on this bill, balance 270." /
+  "Please keep it for your records." If the first template can't be renamed, use `bill_receipt2` and the secret
+  `WHATSAPP_TEMPLATE` = `bill_receipt2`.
+- The Telegram text for a customer's WhatsApp reply no longer says "reply in the WhatsApp Business app" (impossible
+  on an API number): "Call them, or WhatsApp them from your phone".
+- `01_schema.sql` ends with a clean-up that drops the bot's parts (`wa_chats`, `wa_book`, `wa_enquiry`, setting
+  `wa_bot_on`) if they were made by an earlier run. Settings stay at 45.
 
 ### Files
-- `supabase/01_schema.sql`: new section at the end: table `wa_chats` (no policies: service key only), setting
-  `wa_bot_on`, `wa_book(jsonb)`, `wa_enquiry(jsonb)` (service role only).
-- `supabase/functions/whatsapp/index.ts`: `botReply()` (the conversation, no I/O), `botTurn()` (webhook),
-  `waPayload()`, `openHours()`, `slotsFor()`, `pricesText()`, `confirmText()`, action `booking_confirm`;
-  `billValues()` plain points line; `customerAnswer()` returns 'comment' for words after feedback.
-- `src/pages/Appointments.jsx` (confirm → booking_confirm), `src/pages/Settings.jsx` (switch),
-  `src/lib/localdb.js` (demo), `src/lib/supadb.js` (`wa_chats` key), `supabase/04_check.sql` (46), README.
-- Tests: `tests/wa-bot.test.mjs` (new, 55: the whole conversation on the real menu, WhatsApp's size limits on every
-  message, the webhook, confirm), `tests/menu.test.mjs` (wa_book / wa_enquiry rules), `tests/wa-api.test.mjs`.
+- `supabase/functions/whatsapp/index.ts` (`billValues`, the template comment, the Telegram text), README,
+  `tests/wa-api.test.mjs`, `supabase/01_schema.sql` (clean-up at the end).
 
 ### To make it work
-1. Supabase SQL Editor: run `supabase/01_schema.sql` again (`04_check.sql` shows 46 settings).
-2. Redeploy the `whatsapp` function (Verify JWT off).
-3. Meta webhook connected and subscribed to `messages` (README 2e step 7).
-4. Settings → Booking bot → On. Message the salon number "Hi" from your phone.
+Create the template with the new wording (category Utility). Redeploy the `whatsapp` function.
 
 ---
-
 ## 6. Change given back by UPI, and Dues (pay later)
 
 **Branch:** `test` · **Date:** 12 Nov 2026
