@@ -395,7 +395,8 @@ function EditBill({ bill, items, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
-  const due = round2(Number(bill.total) - Number(bill.paid_points || 0));
+  // what was paid in money then: the total less points and less what was left as due (the due stays as it is)
+  const due = round2(Number(bill.total) - Number(bill.paid_points || 0) - Number(bill.paid_due || 0));
   const paid = round2((Number(f.cash) || 0) + (Number(f.upi) || 0) + (Number(f.card) || 0));
   const problem = editProblem(bill, items, f);
   const pick = (l) => [...staff.filter((s) => s.active || s.id === l.staff_id)];

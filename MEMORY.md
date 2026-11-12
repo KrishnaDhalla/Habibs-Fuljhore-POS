@@ -9,6 +9,29 @@ done in Supabase for it to work. Keep this file up to date when something change
 
 ---
 
+## 9. Full test pass (13 Nov 2026) and two fixes from it
+
+**Branch:** `test` · **Date:** 13 Nov 2026
+
+A full pass on the demo build in Chrome (bill with sizes and offers, due, change by UPI, collect a due, cash close
+with a shortage and closing the day, cancel with a wrong and a right owner code, Edit bill, Correct items, start a
+bill from a booking, counter discount, loyalty points, combos, a product sale, Customers, Staff, Payroll, Stock,
+Reports, Settings), plus `npm test`. Not covered there (needs the tablet and the Test project): face check-in,
+printing / RawBT, Telegram approvals, WhatsApp sending, offline billing and upload, two devices at once.
+
+Fixed:
+- **Edit bill on a bill with a due**: the form asked the payment to add up to the full total (₹3,194) instead of the
+  money paid then (₹3,100 = total − points − due), so the payment of such a bill could not be edited (the database
+  rule was right). `src/lib/billEdit.js` (`editProblem`), `src/components/BillView.jsx`; test in `tests/db.test.mjs`.
+- **Offer form (combos)**: the error ("A combo needs at least 2 services") showed below the visible part of the
+  form, so Save seemed to do nothing; and ticking a service moved the list down under the finger. The error is now
+  next to Save, and the ticked services are listed under the list. `src/components/Offers.jsx`.
+
+Seen, left as they are (the owner decides): Clear wipes a started bill with one tap, no question; a product can be
+sold beyond its stock with no warning (the sale is never blocked); the day tiles on Bills don't count dues collected
+(Cash close does); a first-visit bill prints "Loyalty points: balance 0".
+
+---
 ## 8. Call back list (phone enquiries), and a popup for website bookings
 
 **Branch:** `test` · **Date:** 13 Nov 2026

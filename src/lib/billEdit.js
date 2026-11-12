@@ -27,7 +27,8 @@ export function editProblem(bill, items, form) {
   if (Object.keys(p).length === 1) return 'Nothing is changed yet.';
   if ('customer_phone' in p && p.customer_phone && !/^[6-9]\d{9}$/.test(p.customer_phone)) return 'The mobile number must be 10 digits.';
   if ('paid_cash' in p) {
-    const due = amt(Number(bill.total) - Number(bill.paid_points || 0));
+    // the money paid then: the total less points and less what was left as due (the due stays)
+    const due = amt(Number(bill.total) - Number(bill.paid_points || 0) - Number(bill.paid_due || 0));
     if (amt(p.paid_cash + p.paid_upi + p.paid_card) !== due) return `Cash, UPI and card must add up to ${'₹' + due.toLocaleString('en-IN')}.`;
   }
   if (!p.reason) return 'Write why the bill is being changed.';

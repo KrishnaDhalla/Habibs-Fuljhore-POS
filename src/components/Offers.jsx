@@ -180,7 +180,8 @@ function OfferModal({ offer, onClose, onSaved }) {
       foot={
         <>
           {!isNew && <button className="btn danger" onClick={() => setDel(true)}><Trash2 size={15} /> Delete</button>}
-          <span className="grow" />
+          {/* the problem next to Save, where it is always seen (the form is longer than the screen) */}
+          <span className="grow err-text small" id="of-err" role="alert" style={{ margin: 0 }}>{err}</span>
           <button className="btn line" onClick={onClose}>Close</button>
           <button className="btn primary" disabled={busy} onClick={save}>Save offer</button>
         </>
@@ -212,14 +213,6 @@ function OfferModal({ offer, onClose, onSaved }) {
               Tick each service once. At the counter the combo shows in New bill → Combos while it runs; one tap adds these services,
               each with its own staff member, and the bill comes to the combo price. Also applies by itself if the services are added one by one.
             </p>
-            {f.service_ids.length > 0 && (
-              <div className="sub-card small">
-                {f.service_ids.map((id) => <div key={id}>{byId[id] ? `${byId[id].name} · ${rupee(byId[id].price)}` : 'A removed service'}</div>)}
-                <div className="strong" style={{ marginTop: 4 }}>
-                  Worth {rupee(worth)}{Number(f.value) > 0 && Number(f.value) < worth ? ` · combo ${rupee(f.value)} · saves ${rupee(worth - Number(f.value))}` : ''}
-                </div>
-              </div>
-            )}
             <SearchBox value={q} onChange={setQ} placeholder="Search services, e.g. beard, d-tan, eyebrows" />
             <div className="pick-list">
               {pickList.map((s) => (
@@ -229,6 +222,17 @@ function OfferModal({ offer, onClose, onSaved }) {
                   <span className="tiny muted">{noCombo(s) ? 'has sizes or its own price' : `${rupee(s.price)} · ${s.category}`}</span>
                 </label>
               ))}
+            </div>
+            {/* under the list, so ticking a service doesn't move the rows under the finger */}
+            <div className="sub-card small" id="combo-picked">
+              {f.service_ids.length === 0 ? <span className="muted">Nothing ticked yet: a combo needs at least 2 services.</span> : (
+                <>
+                  {f.service_ids.map((id) => <div key={id}>{byId[id] ? `${byId[id].name} · ${rupee(byId[id].price)}` : 'A removed service'}</div>)}
+                  <div className="strong" style={{ marginTop: 4 }}>
+                    Worth {rupee(worth)}{Number(f.value) > 0 && Number(f.value) < worth ? ` · combo ${rupee(f.value)} · saves ${rupee(worth - Number(f.value))}` : ''}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -284,7 +288,6 @@ function OfferModal({ offer, onClose, onSaved }) {
           <label className="check"><input type="checkbox" checked={f.new_customers_only} onChange={(e) => set('new_customers_only', e.target.checked)} /> Only for a customer's first visit</label>
           <label className="check"><input type="checkbox" checked={f.active} onChange={(e) => set('active', e.target.checked)} /> Offer is switched on</label>
         </div>
-        {err && <p className="err-text">{err}</p>}
       </div>
     </Modal>
   );

@@ -1476,6 +1476,13 @@ for (const [t, want] of fyCases) {
   const ch = editChanges(cur, its, { ...form, note: 'VIP', reason: 'Tag' });
   check('edit (app): only what changed is sent', JSON.stringify(ch) === JSON.stringify({ reason: 'Tag', note: 'VIP' }), JSON.stringify(ch));
   check('edit (app): payments that don\'t add up are caught before saving', /must add up/.test(editProblem(cur, its, { ...form, cash: 1, upi: 0, card: 0, reason: 'x' })));
+  {
+    // a bill with a due: the payment must add up to what was paid then (total − due), like edit_bill() in the database
+    const dueBill = { total: 3194, paid_points: 0, paid_due: 94, paid_cash: 3100, paid_upi: 0, paid_card: 0, customer_phone: '9876501234', customer_name: 'R', note: '' };
+    const f0 = { name: 'R', phone: '9876501234', staff: {}, note: '', reason: 'paid by UPI' };
+    check('edit (app): a bill with a due: Cash → UPI for the money paid is allowed', editProblem(dueBill, [], { ...f0, cash: 2100, upi: 1000, card: 0 }) === '');
+    check('edit (app): …and adding up to the full total (due included) is refused', /must add up to ₹3,100/.test(editProblem(dueBill, [], { ...f0, cash: 3194, upi: 0, card: 0 })));
+  }
   // correct items: cancel, then a new bill that replaces it
   const [cx] = await O(`select * from cancel_bill($1, $2)`, [bill.id, 'Corrected: wrong service']);
   check('correct: the owner cancels it', cx && cx.status === 'cancelled', JSON.stringify(cx));
