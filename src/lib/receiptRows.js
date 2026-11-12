@@ -19,13 +19,17 @@ export function offerLines(items) {
 export const staffPriceTotal = (items) => round2((items || []).reduce((a, it) => a + (Number(it.staff_discount) || 0), 0));
 export const manualDiscount = (bill, items) => round2((Number(bill.discount) || 0) - (Number(bill.offer_discount) || 0) - staffPriceTotal(items));
 
+// "Cash", "Cash ₹2,000 + Due ₹100", "Cash (change ₹50 given by UPI)"
 export function payText(b) {
-  if (b.pay_mode !== 'Split' && !(Number(b.paid_points) > 0)) return b.pay_mode;
-  return [['Points', b.paid_points], ['Cash', b.paid_cash], ['UPI', b.paid_upi], ['Card', b.paid_card]]
+  const chg = Number(b.change_upi) > 0 ? ` (change ${rupee(b.change_upi)} given by UPI)` : '';
+  if (b.pay_mode !== 'Split' && !(Number(b.paid_points) > 0) && !(Number(b.paid_due) > 0)) return b.pay_mode + chg;
+  return [['Points', b.paid_points], ['Cash', b.paid_cash], ['UPI', b.paid_upi], ['Card', b.paid_card], ['Due', b.paid_due]]
     .filter(([, v]) => Number(v) > 0)
     .map(([k, v]) => `${k} ${rupee(v)}`)
-    .join(' + ');
+    .join(' + ') + chg;
 }
+// What is still owed on a bill (0 when paid in full)
+export const dueLeft = (b) => Math.max(0, Math.round(((Number(b.paid_due) || 0) - (Number(b.due_cleared) || 0)) * 100) / 100);
 
 // Rows: { t: 'center' | 'left' | 'lr' | 'sub' | 'hr', text, right, bold, big }
 export function receiptRows(bill, items, settings) {
@@ -76,6 +80,12 @@ export function receiptRows(bill, items, settings) {
     LR('Paid', rupee(round2(Number(bill.total) - pts)), { bold: true });
   }
   LR('Paid by', payText(bill));
+  // A due: paid now, and what is left to pay later
+  if (Number(bill.paid_due) > 0 && !cancelled) {
+    LR('Paid now', rupee(round2(Number(bill.total) - pts - Number(bill.paid_due))));
+    LR('DUE (to pay later)', rupee(bill.paid_due), { bold: true });
+    if (Number(bill.due_cleared) > 0) LR(dueLeft(bill) > 0 ? 'Due paid since' : 'Due paid in full', rupee(bill.due_cleared));
+  }
   // Loyalty points
   const rules = loyaltyRules(s);
   const p = pointsSummary(bill, rules);

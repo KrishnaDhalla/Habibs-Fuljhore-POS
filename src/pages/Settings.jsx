@@ -67,7 +67,7 @@ function SalonSettings() {
   };
   const keys = ['salon_name', 'branch', 'address', 'phone', 'instagram', 'gstin', 'prices_include_gst', 'bill_prefix', 'bill_footer', 'max_discount_pct', 'upi_id', 'receipt_width', 'opening_hours', 'whatsapp', 'maps_url', 'paid_offs_per_month',
     'leave_blocked_days', 'leave_notice_days', 'leave_one_at_a_time', 'leave_alert_days', 'staff_free_sections', 'staff_discount_pct', 'wa_bills_on', 'wa_slips_on',
-    'wa_feedback_on', 'wa_feedback_after_hours', 'google_review_url', 'wa_review_all', 'wa_reminders_on', 'wa_remind_hours', 'wa_winback_on', 'wa_winback_days', 'wa_winback_text', 'wa_winback_per_day', 'cash_tolerance',
+    'wa_feedback_on', 'wa_feedback_after_hours', 'google_review_url', 'wa_review_all', 'wa_reminders_on', 'wa_remind_hours', 'wa_winback_on', 'wa_winback_days', 'wa_winback_text', 'wa_winback_per_day', 'cash_tolerance', 'due_max_counter',
     'loyalty_on', 'loyalty_earn_pct', 'loyalty_min_use', 'loyalty_max_use_pct', 'loyalty_expiry_months', 'loyalty_products'];
 
   const save = async () => {
@@ -89,7 +89,7 @@ function SalonSettings() {
       wa_review_all: f.wa_review_all !== false, wa_reminders_on: f.wa_reminders_on === true, wa_remind_hours: Math.max(1, Math.round(num('wa_remind_hours', 3, 48))),
       wa_winback_on: f.wa_winback_on === true, wa_winback_days: Math.max(14, Math.round(num('wa_winback_days', 45, 300))),
       wa_winback_text: String(f.wa_winback_text || '').trim().slice(0, 160) || 'We would love to see you again.', wa_winback_per_day: Math.round(num('wa_winback_per_day', 20, 200)),
-      cash_tolerance: Math.round(num('cash_tolerance', 10, 1000)) };
+      cash_tolerance: Math.round(num('cash_tolerance', 10, 1000)), due_max_counter: Math.round(num('due_max_counter', 200, 100000)) };
     if (next.google_review_url && !/^https:\/\/\S+$/.test(next.google_review_url)) { setErr('The Google review link must start with https://'); return; }
     try {
       for (const k of keys) if (JSON.stringify(next[k]) !== JSON.stringify(settings[k])) await saveSetting(k, next[k]);
@@ -134,6 +134,7 @@ function SalonSettings() {
           </Field>
           <Field label="Bill number prefix" hint="Change only at the start of a financial year (April)."><input className="input" id="st-prefix" value={f.bill_prefix || ''} onChange={set('bill_prefix')} /></Field>
           <Field label="Max discount without the owner (%)"><input className="input" id="st-maxd" inputMode="numeric" value={f.max_discount_pct ?? ''} onChange={(e) => setF({ ...f, max_discount_pct: e.target.value.replace(/\D/g, '') })} /></Field>
+          <Field label="Max due without the owner (₹)" hint="Part of a bill left to pay later. More needs the owner."><input className="input" id="st-maxdue" inputMode="numeric" value={f.due_max_counter ?? 200} onChange={(e) => setF({ ...f, due_max_counter: e.target.value.replace(/\D/g, '') })} /></Field>
           <Field label="UPI ID for QR code" hint="The QR on the bill screen fills in the amount for the customer."><input className="input" id="st-upi" value={f.upi_id || ''} onChange={set('upi_id')} placeholder="habibsfuljhore@okicici" /></Field>
           <Field label="Receipt printer paper"><Seg full options={[[80, '80 mm'], [58, '58 mm']]} value={Number(f.receipt_width) || 80} onChange={(v) => setF({ ...f, receipt_width: v })} /></Field>
         </div>

@@ -177,10 +177,12 @@ export function checkBill(p) {
   bad(P(p.round_off) !== P(p.total) - grand, 'Round off is wrong');
   bad(P(p.total) < 0, 'Total below 0');
   // Points (loyalty) are a payment too, in whole rupees
-  const paid = ['paid_cash', 'paid_upi', 'paid_card', 'paid_points'];
+  // A due (pay later) is part of the total too; change given back by UPI is only on cash received
+  const paid = ['paid_cash', 'paid_upi', 'paid_card', 'paid_points', 'paid_due'];
   bad(P(p.paid_points) % 100 !== 0, 'Points are whole rupees');
   bad(paid.some((k) => P(p[k]) < 0), 'A payment amount is below 0');
   bad(paid.reduce((a, k) => a + P(p[k]), 0) !== P(p.total), 'Payments do not add up to the total');
+  bad(P(p.change_upi) < 0 || (P(p.change_upi) > 0 && P(p.paid_cash) <= 0), 'Change by UPI is only for cash received');
   bad(!['Cash', 'UPI', 'Card', 'Split'].includes(p.pay_mode), 'Payment mode missing');
   return out;
 }

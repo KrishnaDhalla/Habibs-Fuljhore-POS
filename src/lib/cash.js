@@ -15,24 +15,34 @@ export const countNotes = (notes) => round2(NOTES.reduce((a, n) => a + n * (Math
 const sum = (rows, f) => round2(rows.reduce((a, r) => a + (Number(f(r)) || 0), 0));
 
 // What should be in the drawer now
-export function cashNow({ bills, expenses, closes, now = new Date() }) {
+//   Change given back by UPI: the note stayed in the drawer (cash + change), the change went out by UPI.
+//   Dues collected (due_payments) come in on the day they are paid; given back if their bill is cancelled later.
+export function cashNow({ bills, expenses, closes, dues = [], now = new Date() }) {
   const last = [...(closes || [])].sort((a, b) => (a.closed_at < b.closed_at ? 1 : -1))[0] || null;
   const start = last ? last.closed_at : new Date(istDay(now) + 'T00:00:00+05:30').toISOString();
   const t = (v) => new Date(v).getTime();
   const s = t(start), n = t(now);
   const paid = (bills || []).filter((b) => b.status === 'paid' && t(b.created_at) > s && t(b.created_at) <= n);
   const exp = (expenses || []).filter((e) => !e.cancelled_at && t(e.created_at) > s);
-  const refunds = last ? sum((bills || []).filter((b) => b.status === 'cancelled' && t(b.created_at) <= s && b.cancelled_at && t(b.cancelled_at) > s), (b) => b.paid_cash) : 0;
+  const gone = last ? (bills || []).filter((b) => b.status === 'cancelled' && b.cancelled_at && t(b.cancelled_at) > s) : [];
+  const goneIds = new Set(gone.map((b) => b.id));
+  const refunds = last ? round2(sum(gone.filter((b) => t(b.created_at) <= s), (b) => b.paid_cash)
+    + sum((dues || []).filter((d) => d.mode === 'cash' && t(d.created_at) <= s && goneIds.has(d.bill_id)), (d) => d.amount)) : 0;
   const back = last ? sum((expenses || []).filter((e) => e.paid_from === 'cash' && t(e.created_at) <= s && e.cancelled_at && t(e.cancelled_at) > s), (e) => e.amount) : 0;
   const opening = last ? Number(last.closing_cash) || 0 : 0;
-  const cashSales = sum(paid, (b) => b.paid_cash);
+  const stillPaid = new Set((bills || []).filter((b) => b.status === 'paid').map((b) => b.id));
+  const col = (dues || []).filter((d) => t(d.created_at) > s && t(d.created_at) <= n && stillPaid.has(d.bill_id));
+  const colBy = (m) => sum(col.filter((d) => d.mode === m), (d) => d.amount);
+  const cashSales = round2(sum(paid, (b) => Number(b.paid_cash) + (Number(b.change_upi) || 0)) + colBy('cash'));
   const cashExp = round2(sum(exp.filter((e) => e.paid_from === 'cash'), (e) => e.amount) - back);
   return {
     first: !last, from_at: last ? last.closed_at : null, last_day: last ? last.day : null,
     opening_cash: opening, cash_sales: cashSales, cash_refunds: refunds, cash_expenses: cashExp,
     expected: round2(opening + cashSales - refunds - cashExp),
-    bills: paid.length, total_sales: sum(paid, (b) => b.total), upi_sales: sum(paid, (b) => b.paid_upi), card_sales: sum(paid, (b) => b.paid_card),
-    expenses_total: sum(exp, (e) => e.amount),
+    bills: paid.length, total_sales: sum(paid, (b) => b.total),
+    upi_sales: round2(sum(paid, (b) => Number(b.paid_upi) - (Number(b.change_upi) || 0)) + colBy('upi')),
+    card_sales: round2(sum(paid, (b) => b.paid_card) + colBy('card')),
+    expenses_total: sum(exp, (e) => e.amount), due_collected: sum(col, (d) => d.amount),
   };
 }
 
@@ -78,5 +88,6 @@ export function checkClose(p, figures, settings) {
     expected, counted, difference, taken_out: taken, closing_cash: round2(counted - taken),
     notes: p.notes && typeof p.notes === 'object' && !Array.isArray(p.notes) ? p.notes : null, note,
     bills: figures.bills, total_sales: figures.total_sales, upi_sales: figures.upi_sales, card_sales: figures.card_sales, expenses_total: figures.expenses_total,
+    due_collected: figures.due_collected || 0,
   };
 }

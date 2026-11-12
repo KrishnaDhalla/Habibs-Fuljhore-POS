@@ -18,7 +18,7 @@ const KEY = 'habibs-pos-demo-v1';
 const TABLES = ['settings', 'services', 'customers', 'staff', 'attendance', 'staff_advances', 'payslips',
   'products', 'stock_moves', 'bills', 'bill_items', 'counters', 'offers', 'owner_grants', 'owner_secrets', 'service_usage',
   'service_categories', 'service_changes', 'bookings', 'booking_items', 'unit_ends', 'free_uses', 'unit_checks', 'enquiries',
-  'staff_faces', 'check_ins', 'staff_documents', 'leave_requests', 'doc_files', 'loyalty_points', 'wa_messages', 'expenses', 'cash_closes', 'feedback', 'bill_edits'];
+  'staff_faces', 'check_ins', 'staff_documents', 'leave_requests', 'doc_files', 'loyalty_points', 'wa_messages', 'expenses', 'cash_closes', 'feedback', 'bill_edits', 'due_payments'];
 const VERSION = 8;
 const DEMO_FILES_MAX = 4500000; // the browser keeps about 5 MB for the demo, files included
 // A grey face shape: the photo of the example check-ins
@@ -42,7 +42,7 @@ const DEFAULTS = {
   free_uses: { qty: 1, option_label: null, extra_label: null, note: null },
   bookings: { status: 'requested', source: 'whatsapp', slot_at: null, staff_id: null, note: null, bill_id: null, confirmed_at: null, reminded_at: null, confirm_sent_at: null, cancel_reason: null, enquiry_id: null },
   enquiries: { status: 'new', source: 'whatsapp', service_ids: null, follow_up_on: null, close_reason: null, booking_id: null, message: null },
-  bills: { status: 'paid', discount: 0, cgst: 0, sgst: 0, round_off: 0, paid_cash: 0, paid_upi: 0, paid_card: 0, paid_points: 0, points_earned: 0, points_balance: null },
+  bills: { status: 'paid', discount: 0, cgst: 0, sgst: 0, round_off: 0, paid_cash: 0, paid_upi: 0, paid_card: 0, paid_points: 0, points_earned: 0, points_balance: null, paid_due: 0, change_upi: 0, due_cleared: 0, due_left: 0 },
   loyalty_points: { bill_id: null, note: null, created_by: null },
   payslips: { status: 'paid' },
   attendance: { note: null, marked_by: null },
@@ -80,7 +80,7 @@ export const DEFAULT_SETTINGS = {
   wa_feedback_on: false, wa_feedback_after_hours: 2, google_review_url: '', wa_review_all: true,
   wa_reminders_on: false, wa_remind_hours: 3,
   wa_winback_on: false, wa_winback_days: 45, wa_winback_text: 'We would love to see you again.', wa_winback_per_day: 20,
-  cash_tolerance: 10, expense_categories: DEFAULT_CATEGORIES,
+  cash_tolerance: 10, due_max_counter: 200, expense_categories: DEFAULT_CATEGORIES,
   loyalty_on: true,
   loyalty_earn_pct: 5,
   loyalty_min_use: 100,
@@ -497,6 +497,18 @@ export function createLocalDb() {
     if (expiring) expirePoints(cust.id, when);
     const isNew = cust ? !T('bills').some((b) => b.customer_id === cust.id && b.status === 'paid' && b.created_at < when) : false;
     const earn = earnPoints(p, rules, { phone: p.customer_phone || null, staff: T('staff') });
+    // A due (pay later): with the customer's number; above the limit (Settings, ₹200) the owner. Offline: a CHECK note.
+    const due = Number(p.paid_due) || 0;
+    const chg = Number(p.change_upi) || 0;
+    if (due > 0) {
+      const max = Number(settingsObj().due_max_counter ?? 200);
+      const derr = !p.customer_phone ? "a due needs the customer's mobile number" : due > max && !ownerHere() ? `a due above ₹${max} needs the owner` : null;
+      if (derr) {
+        if (!p.bill_no) throw new Error('Due: ' + derr);
+        note = [note, `CHECK: ₹${due} due offline, but ${derr}`].filter(Boolean).join(' | ');
+      }
+    }
+    if (chg > 0) note = [note, `Change ₹${chg} given by UPI`].filter(Boolean).join(' | ');
     // the financial year in the number: a past bill's own date; every other bill, the day it is saved (like the database)
     const day = past ? istDay(when) : istDay(new Date());
     let y = Number(day.slice(0, 4));
@@ -532,7 +544,7 @@ export function createLocalDb() {
       subtotal: p.subtotal, offer_discount: p.offer_discount || 0, discount: p.discount || 0, taxable: p.taxable,
       cgst: p.cgst || 0, sgst: p.sgst || 0, round_off: p.round_off || 0, total: p.total,
       pay_mode: p.pay_mode, paid_cash: p.paid_cash || 0, paid_upi: p.paid_upi || 0, paid_card: p.paid_card || 0,
-      paid_points: use, points_earned: earn,
+      paid_points: use, points_earned: earn, paid_due: due, change_upi: chg, due_cleared: 0, due_left: due,
       note, created_by: p.created_by || null, for_staff: sp.for_staff,
     });
     for (const it of p.items) {
@@ -630,7 +642,8 @@ export function createLocalDb() {
       const amt = (k) => { const v = String(p[k] ?? '0'); if (!/^\d+(\.\d{1,2})?$/.test(v)) throw new Error('Type the amounts paid'); return Number(v); };
       const c = amt('paid_cash'), u = amt('paid_upi'), k = amt('paid_card');
       if (c !== Number(b.paid_cash) || u !== Number(b.paid_upi) || k !== Number(b.paid_card)) {
-        const due = Math.round((Number(b.total) - Number(b.paid_points || 0)) * 100);
+        if (Number(b.change_upi) > 0) throw new Error('Change was given by UPI on this bill. Use Correct items instead.');
+        const due = Math.round((Number(b.total) - Number(b.paid_points || 0) - Number(b.paid_due || 0)) * 100);
         if (Math.round((c + u + k) * 100) !== due) throw new Error(`Cash, UPI and card must add up to ₹${due / 100}`);
         if (T('cash_closes').some((x) => x.closed_at >= b.created_at)) throw new Error("The cash for that time is already closed, so how this bill was paid can't change now");
         const mode = (c > 0) + (u > 0) + (k > 0) > 1 ? 'Split' : u > 0 ? 'UPI' : k > 0 ? 'Card' : 'Cash';
@@ -646,6 +659,23 @@ export function createLocalDb() {
     b.edited_at = new Date().toISOString();
     insertRow('bill_edits', { bill_id: b.id, edited_by: 'demo owner', reason, changes: ch, edited_at: b.edited_at });
     return b;
+  }
+
+  // A due collected at the counter (same rules as collect_due() in the database)
+  function collectDue(p) {
+    const b = T('bills').find((x) => x.id === p.bill_id);
+    if (!b) throw new Error('Bill not found');
+    if (b.status !== 'paid') throw new Error('This bill is cancelled: nothing is due');
+    const v = String(p.amount ?? '');
+    if (!/^\d+(\.\d{1,2})?$/.test(v) || Number(v) <= 0) throw new Error('Type the amount paid');
+    const left = round2((Number(b.paid_due) || 0) - (Number(b.due_cleared) || 0));
+    if (Number(v) > left) throw new Error(`Only ₹${left} is due on ${b.bill_no}`);
+    const mode = p.mode || 'cash';
+    if (!['cash', 'upi', 'card'].includes(mode)) throw new Error('Choose how it was paid');
+    const r = insertRow('due_payments', { bill_id: b.id, customer_id: b.customer_id || null, amount: Number(v), mode, note: String(p.note || '').trim() || null, created_by: 'demo' });
+    b.due_cleared = round2((Number(b.due_cleared) || 0) + Number(v));
+    b.due_left = round2(Number(b.paid_due) - b.due_cleared);
+    return r;
   }
 
   function cancelBill({ p_id, p_reason }) {
@@ -812,7 +842,7 @@ export function createLocalDb() {
     if (!/^[0-9]+(\.[0-9]{1,2})?$/.test(String(p.taken_out ?? '0'))) throw new Error('Type the cash taken out');
     if (Number(p.taken_out ?? 0) > Number(p.counted)) throw new Error("Cash taken out can't be more than the cash counted");
     const rest = T('cash_closes').filter((c) => c.day !== today);
-    const row = checkClose(p, cashNow({ bills: T('bills'), expenses: T('expenses'), closes: rest }), settingsObj());
+    const row = checkClose(p, cashNow({ bills: T('bills'), expenses: T('expenses'), closes: rest, dues: T('due_payments') }), settingsObj());
     state.cash_closes = rest;
     return insertRow('cash_closes', { day: today, closed_at: new Date().toISOString(), closed_by: 'demo', notified_at: null, ...row });
   }
@@ -933,10 +963,11 @@ export function createLocalDb() {
       else if (name === 'decide_leave') out = decideLeave(args);
       else if (name === 'add_expense') out = addExpense(args.p);
       else if (name === 'cancel_expense') out = cancelExpense(args);
-      else if (name === 'cash_now') out = cashNow({ bills: T('bills'), expenses: T('expenses'), closes: T('cash_closes') });
+      else if (name === 'cash_now') out = cashNow({ bills: T('bills'), expenses: T('expenses'), closes: T('cash_closes'), dues: T('due_payments') });
       else if (name === 'close_day') out = closeDay(args.p);
       else if (name === 'handle_feedback') out = handleFeedback(args);
       else if (name === 'edit_bill') out = editBill(args.p_id, args.p || {});
+      else if (name === 'collect_due') out = collectDue(args.p || {});
       else throw new Error('Unknown function ' + name);
       persist(state);
       return clone(out);

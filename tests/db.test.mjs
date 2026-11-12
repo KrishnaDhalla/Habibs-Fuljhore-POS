@@ -1205,10 +1205,10 @@ for (const [t, want] of fyCases) {
     && !!(await C(`insert into expenses (day, amount, category) values (current_date, 5, 'x')`)).error && /Only the owner can remove/.test((await C(`select * from cancel_expense($1)`, [e1.id])).error || ''));
 
   // what should be in the drawer: the database and the app work it out the same way
-  const rows = async () => ({ bills: await q(`select * from bills`), expenses: await q(`select * from expenses`), closes: await q(`select * from cash_closes`) });
+  const rows = async () => ({ bills: await q(`select * from bills`), expenses: await q(`select * from expenses`), closes: await q(`select * from cash_closes`), dues: await q(`select * from due_payments`) });
   const same = async (label) => {
     const ra = await C(`select cash_now() f`); if (ra.error) console.log('cash_now:', ra.error); const a = ra[0].f, b = cashNow({ ...(await rows()), now: new Date() });
-    const pick = (x) => ['first', 'opening_cash', 'cash_sales', 'cash_refunds', 'cash_expenses', 'expected', 'bills', 'total_sales', 'upi_sales', 'card_sales', 'expenses_total'].map((k) => (typeof x[k] === 'boolean' ? x[k] : P(x[k]))).join();
+    const pick = (x) => ['first', 'opening_cash', 'cash_sales', 'cash_refunds', 'cash_expenses', 'expected', 'bills', 'total_sales', 'upi_sales', 'card_sales', 'expenses_total', 'due_collected'].map((k) => (typeof x[k] === 'boolean' ? x[k] : P(x[k]))).join();
     check(label, pick(a) === pick(b), JSON.stringify([a, b]));
     return a;
   };
@@ -1490,6 +1490,71 @@ for (const [t, want] of fyCases) {
   check('correct: a bill can be replaced only once', !nb2.replaces, JSON.stringify(nb2.replaces));
   const [nb3] = await C(`select * from create_bill($1)`, [JSON.stringify({ ...mk(B), replaces: nb.id })]);
   check('correct: only a cancelled bill can be replaced', !nb3.replaces && !(await q(`select replaced_by from bills where id = $1`, [nb.id]))[0].replaced_by);
+}
+{
+  // ---------- dues (pay later) and change given back by UPI ----------
+  await q(`update settings set value = '20' where key = 'max_discount_pct'`);
+  const C = (sql, p) => as(clerk, sClerk, () => tryq(sql, p));
+  const O = (sql, p) => as(owner, sOwner, () => tryq(sql, p));
+  const svc = services.find((s) => !s.variants && !s.open_price && Number(s.price) >= 1500 && Number(s.price) <= 3000);
+  const mk = (phone, pay) => {
+    const b = calcBill([{ id: 1, item_type: 'service', service_id: svc.id, name: svc.name, category: svc.category, unit_price: Number(svc.price), qty: 1, gst_pct: 5, staff_id: staff[0].id }], { gstOn: true, inclusive: true });
+    const p = { id: randomUUID(), customer_phone: phone, customer_name: 'Due Test', subtotal: b.subtotal, offer_discount: 0, discount: 0, taxable: b.taxable, cgst: b.cgst, sgst: b.sgst,
+      round_off: b.round_off, total: b.total, pay_mode: 'Cash', paid_cash: b.total, paid_upi: 0, paid_card: 0, paid_due: 0, change_upi: 0,
+      items: b.items.map((l) => ({ ...l, staff_name: staff[0].name, offer_id: '', offer_name: '', offer_discount: 0 })) };
+    return { ...p, ...pay(p.total) };
+  };
+  const D = '9812300011';
+  const save = (who, p) => who(`select * from create_bill($1)`, [JSON.stringify(p)]);
+  const P2 = (n) => Math.round(n * 100) / 100;
+  // the app's check and the database's agree: a due is part of the total
+  const ok1 = mk(D, (t) => ({ pay_mode: 'Split', paid_cash: P2(t - 100), paid_due: 100 }));
+  check('due (app): payments + due add up', checkBill(ok1).length === 0, JSON.stringify(checkBill(ok1)));
+  check('due (app): without the due they don\'t', checkBill({ ...ok1, paid_due: 0 }).length > 0);
+  check('change by UPI (app): only on cash', checkBill(mk(D, (t) => ({ pay_mode: 'UPI', paid_cash: 0, paid_upi: t, change_upi: 50 }))).length > 0);
+  check('due: needs the customer\'s number', /Due: a due needs the customer's mobile number/.test((await save(C, mk('', (t) => ({ pay_mode: 'Split', paid_cash: P2(t - 100), paid_due: 100 })))).error || ''));
+  check('due: above ₹200 the counter can\'t', /Due: a due above ₹200 needs the owner/.test((await save(C, mk(D, (t) => ({ pay_mode: 'Split', paid_cash: P2(t - 500), paid_due: 500 })))).error || ''));
+  const [bo] = await save(O, mk(D, (t) => ({ pay_mode: 'Split', paid_cash: P2(t - 500), paid_due: 500 })));
+  check('due: the owner can leave ₹500 due', bo && Number(bo.paid_due) === 500 && Number(bo.due_left) === 500, JSON.stringify(bo));
+  await q(`insert into settings (key, value) values ('due_max_counter', '600') on conflict (key) do update set value = excluded.value`);
+  check('due: the limit is a setting (₹600: the counter can leave ₹500)', !(await save(C, mk(D, (t) => ({ pay_mode: 'Split', paid_cash: P2(t - 500), paid_due: 500 })))).error);
+  await q(`update settings set value = '200' where key = 'due_max_counter'`);
+  const [b1] = await save(C, ok1);
+  const full = (await save(C, mk('9812300012', () => ({}))))[0];
+  check('due: saved; ₹100 left to pay; points only on the money paid', b1 && Number(b1.due_left) === 100 && b1.points_earned < full.points_earned && b1.points_earned > 0, JSON.stringify([b1 && b1.points_earned, full.points_earned]));
+  // change given back by UPI: the note stays in the drawer
+  const before = (await C(`select cash_now() f`))[0].f;
+  const [bc] = await save(C, mk('', (t) => ({ change_upi: 50 })));
+  const after = (await C(`select cash_now() f`))[0].f;
+  check('change by UPI: saved with a note', bc && Number(bc.change_upi) === 50 && /Change ₹50 given by UPI/.test(bc.note || ''), JSON.stringify(bc));
+  check('change by UPI: the drawer counts the note (bill + ₹50), UPI counts ₹50 out', P(after.cash_sales) - P(before.cash_sales) === P(bc.total) + 5000 && P(after.upi_sales) - P(before.upi_sales) === -5000, JSON.stringify([before, after]));
+  // collecting a due
+  const col = (who, p) => who(`select * from collect_due($1)`, [JSON.stringify(p)]);
+  check('collect: more than is due is refused', /Only ₹100 is due/.test((await col(C, { bill_id: b1.id, amount: '150', mode: 'cash' })).error || ''));
+  check('collect: a bad amount is refused', /Type the amount/.test((await col(C, { bill_id: b1.id, amount: 'abc' })).error || ''));
+  const c1 = (await C(`select cash_now() f`))[0].f;
+  const [d1] = await col(C, { bill_id: b1.id, amount: '60', mode: 'cash' });
+  const c2 = (await C(`select cash_now() f`))[0].f;
+  check('collect: the counter collects ₹60 cash; ₹40 still due', d1 && (await q(`select due_left::float l from bills where id = $1`, [b1.id]))[0].l === 40, JSON.stringify(d1));
+  check('collect: it counts in today\'s cash (and as due collected)', P(c2.cash_sales) - P(c1.cash_sales) === 6000 && P(c2.due_collected) - P(c1.due_collected) === 6000, JSON.stringify([c1, c2]));
+  await col(C, { bill_id: b1.id, amount: '40', mode: 'upi' });
+  check('collect: the rest by UPI → nothing due', (await q(`select due_left::float l, due_cleared::float c from bills where id = $1`, [b1.id]))[0].l === 0);
+  check('collect: nothing more can be collected', /Only ₹0 is due/.test((await col(C, { bill_id: b1.id, amount: '1' })).error || ''));
+  check('collect: a waiting login can\'t', !!(await as(clerk, sPending, () => tryq(`select * from collect_due($1)`, [JSON.stringify({ bill_id: bo.id, amount: '10' })]))).error);
+  // edit: the payments add up to what was paid then (the due stays)
+  const eb = await O(`select * from edit_bill($1, $2)`, [bo.id, JSON.stringify({ reason: 'UPI', paid_cash: 0, paid_upi: P2(Number(bo.total) - 500), paid_card: 0 })]);
+  check('edit: with a due, cash + UPI + card = what was paid then', !eb.error && eb[0].pay_mode === 'UPI' && Number(eb[0].paid_due) === 500, JSON.stringify(eb));
+  check('edit: not the payment of a bill whose change went by UPI', /Change was given by UPI/.test((await O(`select * from edit_bill($1, $2)`, [bc.id, JSON.stringify({ reason: 'x', paid_cash: 0, paid_upi: Number(bc.total), paid_card: 0 })])).error || ''));
+  // the app works out the drawer the same way, with dues and change by UPI
+  const ra = (await C(`select cash_now() f`))[0].f;
+  const rb = cashNow({ bills: await q(`select * from bills`), expenses: await q(`select * from expenses`), closes: await q(`select * from cash_closes`), dues: await q(`select * from due_payments`), now: new Date() });
+  const pick = (x) => ['cash_sales', 'cash_refunds', 'expected', 'upi_sales', 'card_sales', 'due_collected'].map((k) => P(x[k])).join();
+  check('cash now: the app and the database agree with dues and change by UPI', pick(ra) === pick(rb), JSON.stringify([ra, rb]));
+  // the bill says it
+  const { payText, dueLeft } = await import('../src/lib/receiptRows.js');
+  const [bb] = await q(`select * from bills where id = $1`, [b1.id]);
+  check('receipt: "Cash ₹… + Due ₹100", and nothing left now', /Cash ₹[\d,]+ \+ Due ₹100$/.test(payText(bb)) && dueLeft(bb) === 0, payText(bb));
+  check('receipt: "Cash (change ₹50 given by UPI)"', payText(bc) === 'Cash (change ₹50 given by UPI)', payText(bc));
 }
 {
   // the app's bars (src/lib/alerts.js)

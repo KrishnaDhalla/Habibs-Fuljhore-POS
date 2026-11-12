@@ -9,6 +9,56 @@ done in Supabase for it to work. Keep this file up to date when something change
 
 ---
 
+## 6. Change given back by UPI, and Dues (pay later)
+
+**Branch:** `test` · **Date:** 12 Nov 2026
+
+### Why
+- Bill ₹1,950, the customer gives ₹2,000 and there's no ₹50 note: the salon keeps the note and sends ₹50 back by
+  UPI. Before, the cash close showed ₹50 over and the UPI going out was nowhere.
+- Bill ₹2,100, the customer has only ₹2,000: the ₹100 is owed ("udhaar"), and must be tracked and collected.
+
+### What it does
+**Change by UPI** (New bill → Cash → type the cash received): when there's change to return, a tick box
+"No change: give the ₹50 back by UPI". The bill stores `change_upi`; its note says "Change ₹50 given by UPI";
+"Paid by" reads "Cash (change ₹50 given by UPI)". The cash close counts the whole note in the drawer
+(cash + change) and the UPI that went out (UPI − change). Bills → day totals show the same.
+
+**Due (pay later)**:
+- New bill → Cash with less cash than the bill → **"Leave ₹100 as due"** (switches to Split with Cash + Due), or
+  Split → the **Due** line. Save button: "Save bill · ₹2,000 + ₹100 due".
+- Needs the customer's **mobile number**. Up to **₹200** the counter can; more needs the **owner** (unlock by code or
+  Telegram). The limit is in Settings → Salon & bill → "Max due without the owner (₹)" (`due_max_counter`, a new
+  setting: 45 settings now). Not on past bills. Offline bills that break a rule are saved with a CHECK note.
+- **Points** are earned only on the money paid (as decided), not when the due is collected.
+- **The bill shows it** (screen, print, RawBT, WhatsApp): "Paid by Cash ₹2,000 + Due ₹100", "Paid now ₹2,000",
+  "DUE (to pay later) ₹100", and later "Due paid since / in full".
+- **Bills → Dues** tab: every bill with money still owed (customer, number, bill, how long ago, amount), the total
+  owed, a WhatsApp **Remind** button (with the UPI ID), and **Collect** (part or all; cash, UPI or card).
+- **New bill**: when a returning customer's number is typed, "₹100 due from before (HF…) · Collect".
+- A collection counts in **the day it comes in** (cash close: cash/UPI/card, and "due collected"). If a bill is
+  cancelled, its due is gone and any cash collected on it counts as given back.
+- Edit bill: the payment split must add up to what was paid then (the due stays); not for a bill whose change went
+  by UPI (use Correct items).
+
+### Files
+- `supabase/01_schema.sql`: `check_bill()` (due is part of the total; change only on cash), `create_bill()` (due
+  rules, stores `paid_due`, `change_upi`), `cash_now()` / `close_day()` (change and collections, `due_collected`),
+  `edit_bill()`; new section at the end: `bills.paid_due`, `change_upi`, `due_cleared`, `due_left` (generated),
+  `cash_closes.due_collected`, table `due_payments`, `collect_due(jsonb)`; setting `due_max_counter` = 200.
+- `src/lib/calc.js` (checkBill), `src/lib/cash.js` (cashNow, checkClose), `src/lib/receiptRows.js` (`payText`,
+  `dueLeft`, print rows), `src/components/Receipt.jsx`, `src/pages/Billing.jsx` (tick box, Leave as due, Due line,
+  owner OK, earlier dues), `src/pages/Dues.jsx` (new: Dues list, `CollectDue`), `src/pages/Bills.jsx` (Dues tab,
+  day totals), `src/pages/Settings.jsx` (the limit), `src/lib/localdb.js` (demo), `supabase/04_check.sql` (45).
+- Tests: `tests/db.test.mjs` (app and database checks agree; due needs a number; the limit and the owner; the
+  setting; points on money only; change by UPI in the drawer and UPI; collect part, the rest, too much, a waiting
+  login; edit with a due; the app's and database's cash close agree; the receipt text), `tests/loyalty.test.mjs` (45).
+
+### To make it work
+Supabase SQL Editor: run `supabase/01_schema.sql` again (then `04_check.sql` shows 45 settings). Reload the app.
+
+---
+
 ## 5. Edit a saved bill, and Correct items (owner only)
 
 **Branch:** `test` · **Date:** 12 Nov 2026

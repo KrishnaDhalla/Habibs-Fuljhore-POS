@@ -57,7 +57,7 @@ Do all of this **twice**: first for `habibs-test`, then for `habibs`.
 3. **Authentication → Sign In / Providers**: turn **off** "Allow new users to sign up". *Do not skip this.*
 4. **Authentication → Users → Add user** (tick Auto confirm): one login per owner, and one for the counter tablet (e.g. `counter@…`). Use long passwords.
 5. Put the owners' emails in `supabase/03_owners.sql` and run it.
-6. Run `supabase/04_check.sql`. **Every line's "found" must equal "should be"** (19 categories, 143 services, 10 tabs, 44 settings, 0 tables without row level security, 1 or more owners).
+6. Run `supabase/04_check.sql`. **Every line's "found" must equal "should be"** (19 categories, 143 services, 10 tabs, 45 settings, 0 tables without row level security, 1 or more owners).
 7. **Project Settings → API Keys**: note the **Project URL** and the **publishable / anon** key of each project.
 
 > **The one rule about keys.** Only the publishable / anon key ever goes into the app, `.env`, GitHub or Cloudflare. The `service_role` / secret key is never copied anywhere: Supabase gives it to the two functions by itself.

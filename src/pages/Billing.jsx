@@ -12,6 +12,8 @@ import { BillView } from '../components/BillView';
 import { loyaltyRules, earnPoints, maxPointsUse, liveBalance, expiresAt, isStaffPhone } from '../lib/loyalty';
 import { staffOfPhone, staffPriceRules, staffPctOf } from '../lib/staffPrice';
 import { waBillsOn } from '../lib/whatsapp';
+import { dueLeft } from '../lib/receiptRows';
+import { CollectDue } from './Dues';
 
 const DRAFT_KEY = 'habibs-pos-draft';
 const EMPTY_NEW = { name: '', gender: '', whatsapp_ok: false };
@@ -129,7 +131,10 @@ export default function Billing({ hasBanner }) {
   const [discVal, setDiscVal] = useState(draft.discVal || '');
   const [payMode, setPayMode] = useState(draft.payMode || '');
   const [cashGiven, setCashGiven] = useState('');
-  const [split, setSplit] = useState({ cash: '', upi: '', card: '' });
+  const [split, setSplit] = useState({ cash: '', upi: '', card: '', due: '' });
+  const [changeUpi, setChangeUpi] = useState(false); // no small change: the change goes back by UPI
+  const [oldDues, setOldDues] = useState([]);         // this customer's earlier bills with money still due
+  const [collectDue, setCollectDue] = useState(null);
   const [note, setNote] = useState('');
   // A discount on one line: the key of the line whose discount is open
   const [lineEdit, setLineEdit] = useState(null);
@@ -212,6 +217,7 @@ export default function Billing({ hasBanner }) {
     let live = true;
     setCust(null);
     setLastVisit(null);
+    setOldDues([]);
     setPtsOn(false);
     setPtsVal('');
     if (!validPhone(phone)) { setLookup(phone.length === 10 ? 'invalid' : 'idle'); return; }
@@ -224,6 +230,7 @@ export default function Billing({ hasBanner }) {
           setCust(c);
           setEditName(c.name || '');
           setLookup('found');
+          db.list('bills', { eq: { customer_id: c.id, status: 'paid' }, gte: { due_left: 0.01 } }).then((r) => { if (live) setOldDues(r.filter((x) => dueLeft(x) > 0)); }).catch(() => {});
           const [b] = await db.list('bills', { eq: { customer_id: c.id, status: 'paid' }, order: ['created_at', 'desc'], limit: 1 });
           if (b && live) {
             const its = await db.list('bill_items', { eq: { bill_id: b.id } });
@@ -413,7 +420,9 @@ export default function Billing({ hasBanner }) {
   }, [dq, activeSection, activeServices, retail, popular]);
 
   // ---------- payment & validation ----------
-  const splitSum = round2((Number(split.cash) || 0) + (Number(split.upi) || 0) + (Number(split.card) || 0));
+  const splitSum = round2((Number(split.cash) || 0) + (Number(split.upi) || 0) + (Number(split.card) || 0) + (Number(split.due) || 0));
+  const dueAmt = payMode === 'Split' ? round2(Number(split.due) || 0) : 0;
+  const dueMax = settings && settings.due_max_counter != null && settings.due_max_counter !== '' ? Number(settings.due_max_counter) : 200;
   const maxDisc = Number(settings && settings.max_discount_pct) || 0;
   const problems = [];
   if (!lines.length) problems.push('Add a service or product');
@@ -422,6 +431,8 @@ export default function Billing({ hasBanner }) {
   if (lines.some((l) => l.item_type === 'service' && !l.staff_id)) problems.push('Choose who did each service');
   if (!payMode) problems.push('Choose how the customer paid');
   if (payMode === 'Split' && Math.abs(splitSum - toPay) > 0.009) problems.push(`Split amounts must add up to ${rupee(toPay)}`);
+  if (dueAmt > 0 && (skip || !validPhone(phone))) problems.push("A due needs the customer's mobile number");
+  if (dueAmt > 0 && past) problems.push('A past bill can\'t have a due');
   // A past bill: the day and time it was made (before now), and the internet
   const pastAt = past && past.date && /^\d\d:\d\d$/.test(past.time || '') ? `${past.date}T${past.time}:00+05:30` : '';
   if (past && !pastAt) problems.push('Past bill: enter the day and time of the bill');
@@ -430,7 +441,7 @@ export default function Billing({ hasBanner }) {
 
   const reset = () => {
     setPhone(''); setSkip(false); setCust(null); setLookup('idle'); setNewCust(EMPTY_NEW); setEditName('');
-    setLines([]); setDiscVal(''); setDiscType('pct'); setPayMode(''); setCashGiven(''); setSplit({ cash: '', upi: '', card: '' });
+    setLines([]); setDiscVal(''); setDiscType('pct'); setPayMode(''); setCashGiven(''); setSplit({ cash: '', upi: '', card: '', due: '' }); setChangeUpi(false);
     setNote(''); setTried(false); setShowBill(false); setLastVisit(null); setOffersOn(true); setPtsOn(false); setPtsVal('');
     setLineEdit(null); setPast(null); setWaSend(true); setReplaces(null);
   };
@@ -483,6 +494,8 @@ export default function Billing({ hasBanner }) {
         approvedDisc.current = { billId: billId.current, grantId, amount: bill.manualDiscount };
       }
     }
+    // A due above the limit (Settings, ₹200): the owner's OK (unlock by code or Telegram)
+    if (dueAmt > dueMax && !(await askOwner(`A due above ${rupee(dueMax)} needs the owner.`))) return;
     savingRef.current = true;
     setSaving(true);
     try {
@@ -494,6 +507,8 @@ export default function Billing({ hasBanner }) {
         paid_upi: payMode === 'UPI' ? toPay : payMode === 'Split' ? round2(Number(split.upi) || 0) : 0,
         paid_card: payMode === 'Card' ? toPay : payMode === 'Split' ? round2(Number(split.card) || 0) : 0,
         paid_points: pointsUsed,
+        paid_due: dueAmt,
+        change_upi: payMode === 'Cash' && changeUpi && cashReturn > 0 ? cashReturn : 0,
       };
       const payload = {
         customer_phone: skip ? '' : phone,
@@ -716,6 +731,12 @@ export default function Billing({ hasBanner }) {
                         {balance >= rules.minUse && <span className="muted"> · ₹{balance} off, up to {rules.maxPct}% of a bill</span>}
                         {balance > 0 && cust.last_visit && <span className="muted"> · valid till {fmtDate(expiresAt(cust.last_visit, rules))}</span>}
                         {balance === 0 && Number(cust.points) > 0 && <span className="muted"> · {cust.points} expired (no visit for {rules.months} months)</span>}
+                      </div>
+                    )}
+                    {oldDues.length > 0 && (
+                      <div className="small warn-text" id="old-dues">
+                        <b>{rupee(round2(oldDues.reduce((a, x) => a + dueLeft(x), 0)))} due</b> from before ({oldDues.map((x) => x.bill_no).join(', ')}).{' '}
+                        <button className="link small" onClick={() => setCollectDue(oldDues[0])}>Collect</button>
                       </div>
                     )}
                     {lastVisit && (
@@ -949,9 +970,23 @@ export default function Billing({ hasBanner }) {
                   )}
                 </div>
               )}
+              {/* No small change: keep the note, send the change by UPI (the cash close counts the note) */}
+              {payMode === 'Cash' && cashReturn > 0 && (
+                <label className="check small" id="change-upi">
+                  <input type="checkbox" checked={changeUpi} onChange={(e) => setChangeUpi(e.target.checked)} />
+                  <span>No change: give the {rupee(cashReturn)} back <b>by UPI</b> from the salon's account</span>
+                </label>
+              )}
+              {/* Short of money: the rest as a due (pay later) */}
+              {payMode === 'Cash' && cashReturn < 0 && Number(cashGiven) > 0 && !past && (
+                <button className="btn line sm" id="leave-due" style={{ alignSelf: 'flex-start' }}
+                  onClick={() => { setSplit({ cash: String(round2(Number(cashGiven))), upi: '', card: '', due: String(round2(-cashReturn)) }); setPayMode('Split'); }}>
+                  Leave {rupee(-cashReturn)} as due (pays later)
+                </button>
+              )}
               {payMode === 'Split' && (
                 <div className="stack tight">
-                  {[['cash', 'Cash'], ['upi', 'UPI'], ['card', 'Card']].map(([k, l]) => (
+                  {[['cash', 'Cash'], ['upi', 'UPI'], ['card', 'Card'], ...(past ? [] : [['due', 'Due']])].map(([k, l]) => (
                     <div className="row" key={k}>
                       <span style={{ width: 52 }}>{l}</span>
                       <div className="grow"><MoneyInput id={'split-' + k} value={split[k]} onChange={(v) => setSplit({ ...split, [k]: v })} /></div>
@@ -961,6 +996,12 @@ export default function Billing({ hasBanner }) {
                     Entered {rupee(splitSum)} of {rupee(toPay)}
                     {toPay - splitSum > 0.009 ? ` · ${rupee(round2(toPay - splitSum))} left` : ''}
                   </span>
+                  {dueAmt > 0 && (
+                    <span className="small warn-text" id="due-note">
+                      {rupee(dueAmt)} due: the customer pays it later (Bills → Dues). It's printed on the bill.
+                      {dueAmt > dueMax ? ` Above ${rupee(dueMax)}: needs the owner.` : ''}
+                    </span>
+                  )}
                 </div>
               )}
               {(payMode === 'UPI' || (payMode === 'Split' && Number(split.upi) > 0)) && (
@@ -983,7 +1024,7 @@ export default function Billing({ hasBanner }) {
 
         <div className="bill-foot">
           <button className="btn primary block lg" disabled={saving} onClick={save}>
-            {saving ? 'Saving…' : `Save bill · ${rupee(toPay)}${pointsUsed ? ' + points' : ''}`}
+            {saving ? 'Saving…' : `Save bill · ${rupee(round2(toPay - dueAmt))}${pointsUsed ? ' + points' : ''}${dueAmt > 0 ? ` + ${rupee(dueAmt)} due` : ''}`}
           </button>
           <div className="hint" aria-live="polite">{tried && problems[0] ? problems[0] : ''}</div>
         </div>
@@ -992,6 +1033,10 @@ export default function Billing({ hasBanner }) {
       {findName && <FindCustomer onPick={(c) => { setPhone(c.phone); setSkip(false); setFindName(false); }} onClose={() => setFindName(false)} />}
 
       {/* ================= Pickers ================= */}
+      {collectDue && (
+        <CollectDue bill={collectDue} onClose={() => setCollectDue(null)}
+          onSaved={() => { const id = collectDue.id; setCollectDue(null); db.list('bills', { eq: { id } }).then((r) => setOldDues((ds) => ds.map((x) => (x.id === id && r[0] ? r[0] : x)).filter((x) => dueLeft(x) > 0))).catch(() => {}); }} />
+      )}
       {picker && picker.mode === 'variant' && (() => {
         const sv = picker.service;
         const ex = sv.extra_options && sv.extra_options.choices ? sv.extra_options : null;

@@ -4,7 +4,7 @@ import { rupee, fmtDateTime, fmtPhone, round2 } from '../lib/format';
 import { textReceipt, rawbtUrl } from '../lib/textReceipt';
 import { gstByRate, gstIncluded } from '../lib/calc';
 import { loyaltyRules, pointsSummary, pointsWhatsApp } from '../lib/loyalty';
-import { offerLines, manualDiscount, payText, staffPriceTotal } from '../lib/receiptRows';
+import { offerLines, manualDiscount, payText, staffPriceTotal, dueLeft } from '../lib/receiptRows';
 
 export { offerLines, manualDiscount, payText };
 
@@ -72,6 +72,13 @@ export function Receipt({ bill, items, settings }) {
       {Number(bill.paid_points) > 0 && <div className="r2"><span>Paid with points</span><span>−{rupee(bill.paid_points)}</span></div>}
       {Number(bill.paid_points) > 0 && <div className="r2 b"><span>Paid</span><span>{rupee(round2(Number(bill.total) - Number(bill.paid_points)))}</span></div>}
       <div className="r2"><span>Paid by</span><span>{payText(bill)}</span></div>
+      {Number(bill.paid_due) > 0 && bill.status !== 'cancelled' && (
+        <>
+          <div className="r2"><span>Paid now</span><span>{rupee(round2(Number(bill.total) - (Number(bill.paid_points) || 0) - Number(bill.paid_due)))}</span></div>
+          <div className="r2 b"><span>DUE (to pay later)</span><span>{rupee(bill.paid_due)}</span></div>
+          {Number(bill.due_cleared) > 0 && <div className="r2"><span>{dueLeft(bill) > 0 ? 'Due paid since' : 'Due paid in full'}</span><span>{rupee(bill.due_cleared)}</span></div>}
+        </>
+      )}
       <PointsBox bill={bill} settings={s} />
       <hr />
       {gstOn && <div className="c">SAC 9997 · Prices {gstIncluded(bill) ? 'include' : 'exclude'} GST</div>}
@@ -151,6 +158,7 @@ export function billWhatsAppText(bill, items, settings) {
   lines.push(`*Total${Number(bill.paid_points) > 0 ? '' : ' paid'}: ${rupee(bill.total)}*`);
   if (Number(bill.paid_points) > 0) lines.push(`Paid with points: −${rupee(bill.paid_points)}`, `*Paid: ${rupee(round2(Number(bill.total) - Number(bill.paid_points)))}*`);
   lines.push(`Paid by ${payText(bill)}`);
+  if (Number(bill.paid_due) > 0 && bill.status !== 'cancelled') lines.push(`*Due (to pay later): ${rupee(bill.paid_due)}*`);
   const pts = pointsWhatsApp(bill, loyaltyRules(s));
   if (pts.length) lines.push('', ...pts);
   const tail = [s.instagram ? `Instagram: ${s.instagram}` : '', s.phone ? `Call / WhatsApp: ${s.phone}` : ''].filter(Boolean);

@@ -607,9 +607,15 @@ begin
     raise exception 'Bill check failed: points are whole rupees';
   end if;
   if coalesce((p->>'paid_cash')::numeric, 0) < 0 or coalesce((p->>'paid_upi')::numeric, 0) < 0 or coalesce((p->>'paid_card')::numeric, 0) < 0
+     or coalesce((p->>'paid_due')::numeric, 0) < 0
      or coalesce((p->>'paid_cash')::numeric, 0) + coalesce((p->>'paid_upi')::numeric, 0) + coalesce((p->>'paid_card')::numeric, 0)
-        + coalesce((p->>'paid_points')::numeric, 0) <> n then
+        + coalesce((p->>'paid_points')::numeric, 0) + coalesce((p->>'paid_due')::numeric, 0) <> n then
     raise exception 'Bill check failed: payments do not add up to the total';
+  end if;
+  -- Change given back by UPI (no small notes): only on cash received
+  if coalesce((p->>'change_upi')::numeric, 0) < 0
+     or (coalesce((p->>'change_upi')::numeric, 0) > 0 and coalesce((p->>'paid_cash')::numeric, 0) <= 0) then
+    raise exception 'Bill check failed: change by UPI is only for cash received';
   end if;
   if coalesce(p->>'pay_mode', '') not in ('Cash', 'UPI', 'Card', 'Split') then
     raise exception 'Bill check failed: payment mode missing';
@@ -850,6 +856,9 @@ declare
   v_check  record;
   v_offline boolean := nullif(p->>'bill_no', '') is not null;
   v_use    numeric := coalesce((p->>'paid_points')::numeric, 0);
+  v_due    numeric := coalesce((p->>'paid_due')::numeric, 0);       -- left to pay later (Dues)
+  v_chg    numeric := coalesce((p->>'change_upi')::numeric, 0);     -- change given back by UPI
+  v_duemax numeric := coalesce((select nullif(value #>> '{}', '')::numeric from settings where key = 'due_max_counter'), 200);
   v_earn   int := 0;
   v_bal    int := 0;
   v_perr   text;
@@ -981,6 +990,20 @@ begin
   end if;
   v_earn := bill_points(p, v_phone);
 
+  -- A due (pay later): only with the customer's mobile number; above the limit (Settings, ₹200) only with the owner.
+  -- A bill made offline is saved anyway, with a CHECK note.
+  if v_due > 0 then
+    v_perr := case when v_cust.id is null then 'a due needs the customer''s mobile number'
+                   when v_due > v_duemax and not owner_ok() then 'a due above ₹' || trim_scale(v_duemax) || ' needs the owner' end;
+    if v_perr is not null then
+      if not v_offline then raise exception '%', 'Due: ' || v_perr; end if;
+      v_note := concat_ws(' | ', v_note, 'CHECK: ₹' || trim_scale(v_due) || ' due offline, but ' || v_perr);
+    end if;
+  end if;
+  if v_chg > 0 then
+    v_note := concat_ws(' | ', v_note, 'Change ₹' || trim_scale(v_chg) || ' given by UPI');
+  end if;
+
   -- 2. Bill number: <prefix><financial year>-<running number>, e.g. HF2627-0001
   --    Offline bills keep the number printed on them. If two devices used the same
   --    offline letter, the later one gets "-2" (or "-3" …) added and a note.
@@ -1011,7 +1034,7 @@ begin
   -- 3. Bill
   insert into bills (id, bill_no, created_at, customer_id, customer_name, customer_phone, is_new_customer,
                      subtotal, offer_discount, discount, taxable, cgst, sgst, round_off, total,
-                     pay_mode, paid_cash, paid_upi, paid_card, paid_points, points_earned, note, created_by, for_staff)
+                     pay_mode, paid_cash, paid_upi, paid_card, paid_points, points_earned, note, created_by, for_staff, paid_due, change_upi)
   values (v_id, v_no, v_at,
           v_cust.id, coalesce(nullif(p->>'customer_name', ''), v_cust.name), v_phone, v_new,
           (p->>'subtotal')::numeric, coalesce((p->>'offer_discount')::numeric, 0),
@@ -1019,7 +1042,7 @@ begin
           coalesce((p->>'cgst')::numeric, 0), coalesce((p->>'sgst')::numeric, 0),
           coalesce((p->>'round_off')::numeric, 0), (p->>'total')::numeric,
           p->>'pay_mode', coalesce((p->>'paid_cash')::numeric, 0), coalesce((p->>'paid_upi')::numeric, 0),
-          coalesce((p->>'paid_card')::numeric, 0), v_use, v_earn, v_note, nullif(p->>'created_by', ''), v_sp.for_staff)
+          coalesce((p->>'paid_card')::numeric, 0), v_use, v_earn, v_note, nullif(p->>'created_by', ''), v_sp.for_staff, v_due, v_chg)
   returning * into v_bill;
 
   -- A corrected bill ("Correct items" in the app): it replaces a bill the owner just cancelled. Linked both ways.
@@ -3494,25 +3517,38 @@ declare
   v_start timestamptz;
   v_open  numeric; v_sales numeric; v_ref numeric := 0; v_exp numeric; v_back numeric := 0;
   v_tot   numeric; v_upi numeric; v_card numeric; v_n int; v_all numeric;
+  v_dc    numeric; v_du numeric; v_dk numeric; v_dall numeric;
 begin
   if not session_ok() then raise exception 'This login is not approved yet'; end if;
   select * into v_last from cash_closes order by closed_at desc limit 1;
   v_start := coalesce(v_last.closed_at, ((now() at time zone 'Asia/Kolkata')::date)::timestamp at time zone 'Asia/Kolkata');
   v_open := coalesce(v_last.closing_cash, 0);
-  select coalesce(sum(paid_cash), 0), coalesce(sum(total), 0), coalesce(sum(paid_upi), 0), coalesce(sum(paid_card), 0), count(*)::int
+  -- cash in the drawer: what the bills were paid in cash, plus change given back by UPI (the note stayed in the drawer)
+  select coalesce(sum(paid_cash + change_upi), 0), coalesce(sum(total), 0), coalesce(sum(paid_upi - change_upi), 0), coalesce(sum(paid_card), 0), count(*)::int
     into v_sales, v_tot, v_upi, v_card, v_n
     from bills where created_at > v_start and created_at <= now() and status = 'paid';
+  -- dues collected since then (they come in on the day they are paid)
+  select coalesce(sum(d.amount) filter (where d.mode = 'cash'), 0), coalesce(sum(d.amount) filter (where d.mode = 'upi'), 0),
+         coalesce(sum(d.amount) filter (where d.mode = 'card'), 0), coalesce(sum(d.amount), 0)
+    into v_dc, v_du, v_dk, v_dall
+    from due_payments d join bills b on b.id = d.bill_id
+   where d.created_at > v_start and d.created_at <= now() and b.status = 'paid';
+  v_sales := v_sales + v_dc; v_upi := v_upi + v_du; v_card := v_card + v_dk;
   select coalesce(sum(amount) filter (where paid_from = 'cash'), 0), coalesce(sum(amount), 0) into v_exp, v_all
     from expenses where created_at > v_start and cancelled_at is null;
   if v_last.id is not null then
     select coalesce(sum(paid_cash), 0) into v_ref from bills where created_at <= v_start and status = 'cancelled' and cancelled_at > v_start;
+    -- …and the due collected in cash on those bills before the close (given back too)
+    v_ref := v_ref + coalesce((select sum(d.amount) from due_payments d join bills b on b.id = d.bill_id
+                                where d.mode = 'cash' and d.created_at <= v_start and b.status = 'cancelled' and b.cancelled_at > v_start), 0);
     select coalesce(sum(amount), 0) into v_back from expenses where paid_from = 'cash' and created_at <= v_start and cancelled_at > v_start;
   end if;
   return jsonb_build_object(
     'first', v_last.id is null, 'from_at', v_last.closed_at, 'last_day', v_last.day,
     'opening_cash', v_open, 'cash_sales', v_sales, 'cash_refunds', v_ref, 'cash_expenses', v_exp - v_back,
     'expected', v_open + v_sales - v_ref - v_exp + v_back,
-    'bills', v_n, 'total_sales', v_tot, 'upi_sales', v_upi, 'card_sales', v_card, 'expenses_total', v_all);
+    'bills', v_n, 'total_sales', v_tot, 'upi_sales', v_upi, 'card_sales', v_card, 'expenses_total', v_all,
+    'due_collected', v_dall);
 end $$;
 
 create or replace function close_day(p jsonb) returns cash_closes
@@ -3550,11 +3586,11 @@ begin
     raise exception 'The cash is ₹% %. Write why in the note.', trim_scale(abs(v_diff)), case when v_diff < 0 then 'short' else 'over' end;
   end if;
   insert into cash_closes (day, from_at, opening_cash, cash_sales, cash_refunds, cash_expenses, expected, counted, difference, taken_out,
-                           closing_cash, notes, note, bills, total_sales, upi_sales, card_sales, expenses_total, closed_by)
+                           closing_cash, notes, note, bills, total_sales, upi_sales, card_sales, expenses_total, closed_by, due_collected)
   values (v_today, nullif(f->>'from_at', '')::timestamptz, v_open, (f->>'cash_sales')::numeric, (f->>'cash_refunds')::numeric, (f->>'cash_expenses')::numeric,
           v_exp, v_cnt, v_diff, v_out, v_cnt - v_out, case when jsonb_typeof(p->'notes') = 'object' then p->'notes' end, v_note,
           (f->>'bills')::int, (f->>'total_sales')::numeric, (f->>'upi_sales')::numeric, (f->>'card_sales')::numeric, (f->>'expenses_total')::numeric,
-          auth.jwt() ->> 'email')
+          auth.jwt() ->> 'email', coalesce((f->>'due_collected')::numeric, 0))
   returning * into r;
   return r;
 end $$;
@@ -3722,6 +3758,7 @@ insert into settings (key, value) values
   ('wa_winback_text', '"We would love to see you again."'), -- the line in that message (an offer, if you like)
   ('wa_winback_per_day', '20'),         -- at most this many a day
   ('cash_tolerance', '10'),             -- cash close: a difference above this (₹) needs a note
+  ('due_max_counter', '200'),           -- a due (pay later) above this (₹) needs the owner
   ('expense_categories', '["Tea & snacks", "Cleaning", "Laundry", "Supplies", "Repairs", "Electricity", "Rent", "Internet & phone", "Transport", "Marketing", "Other"]'),
   ('loyalty_on',            'true'),    -- loyalty points (1 point = ₹1)
   ('loyalty_earn_pct',      '5'),       -- earned: % of what is paid for services at their normal price
@@ -3928,8 +3965,9 @@ begin
     end loop;
     v_c := coalesce((p->>'paid_cash')::numeric, 0); v_u := coalesce((p->>'paid_upi')::numeric, 0); v_k := coalesce((p->>'paid_card')::numeric, 0);
     if (v_c, v_u, v_k) is distinct from (b.paid_cash, b.paid_upi, b.paid_card) then
-      if v_c + v_u + v_k <> b.total - b.paid_points then
-        raise exception '%', 'Cash, UPI and card must add up to ₹' || trim_scale(b.total - b.paid_points);
+      if b.change_upi > 0 then raise exception 'Change was given by UPI on this bill. Use Correct items instead.'; end if;
+      if v_c + v_u + v_k <> b.total - b.paid_points - b.paid_due then
+        raise exception '%', 'Cash, UPI and card must add up to ₹' || trim_scale(b.total - b.paid_points - b.paid_due);
       end if;
       if exists (select 1 from cash_closes where closed_at >= b.created_at) then
         raise exception 'The cash for that time is already closed, so how this bill was paid can''t change now';
@@ -3963,3 +4001,63 @@ end $$;
 
 revoke execute on function edit_bill(uuid, jsonb) from public, anon;
 grant  execute on function edit_bill(uuid, jsonb) to authenticated;
+-- =====================================================================
+-- Dues and change by UPI (November 2026)
+--   Change by UPI: the customer pays with a big note and there is no small change. The salon keeps the note and sends
+--   the change by UPI. change_upi is that amount: the cash close counts the note in the drawer (paid_cash +
+--   change_upi) and the UPI that went out (UPI sales − change_upi).
+--   Due (pay later): part of a bill isn't paid now (bill ₹2,100, the customer has ₹2,000). paid_due is that part. It
+--   needs the customer's mobile number; above ₹200 (Settings: due_max_counter) the owner's OK. The bill says "Due".
+--   Points are earned only on what was paid with money (bill_points). A due is collected later (collect_due), on the
+--   day it comes in: the cash close for that day counts it (cash_now). due_left = what is still owed.
+-- =====================================================================
+alter table bills add column if not exists paid_due    numeric(12,2) not null default 0;
+alter table bills add column if not exists change_upi  numeric(12,2) not null default 0;
+alter table bills add column if not exists due_cleared numeric(12,2) not null default 0;
+alter table bills add column if not exists due_left    numeric(12,2) generated always as (paid_due - due_cleared) stored;
+create index if not exists bills_due_idx on bills (due_left) where due_left > 0;
+alter table cash_closes add column if not exists due_collected numeric(12,2) not null default 0;
+
+create table if not exists due_payments (
+  id          uuid primary key default gen_random_uuid(),
+  bill_id     uuid not null references bills(id),
+  customer_id uuid references customers(id),
+  amount      numeric(12,2) not null check (amount > 0),
+  mode        text not null check (mode in ('cash', 'upi', 'card')),
+  note        text,
+  created_at  timestamptz not null default now(),
+  created_by  text
+);
+create index if not exists due_payments_created_idx on due_payments (created_at);
+create index if not exists due_payments_bill_idx on due_payments (bill_id);
+alter table due_payments enable row level security;
+drop policy if exists "app users read" on due_payments;
+create policy "app users read" on due_payments for select to authenticated using ((select session_ok()));
+
+-- The counter collects a due: part or all of it, by cash, UPI or card
+create or replace function collect_due(p jsonb) returns due_payments
+language plpgsql security definer set search_path = public as $$
+declare
+  b    bills;
+  v_a  numeric;
+  v_m  text := coalesce(nullif(p->>'mode', ''), 'cash');
+  r    due_payments;
+begin
+  if not session_ok() then raise exception 'This login is not approved yet'; end if;
+  select * into b from bills where id = case when coalesce(p->>'bill_id', '') ~ '^[0-9a-fA-F-]{36}$' then (p->>'bill_id')::uuid end for update;
+  if not found then raise exception 'Bill not found'; end if;
+  if b.status <> 'paid' then raise exception 'This bill is cancelled: nothing is due'; end if;
+  if coalesce(p->>'amount', '') !~ '^[0-9]+(\.[0-9]{1,2})?$' then raise exception 'Type the amount paid'; end if;
+  v_a := (p->>'amount')::numeric;
+  if v_a <= 0 then raise exception 'Type the amount paid'; end if;
+  if v_a > b.due_left then raise exception '%', 'Only ₹' || trim_scale(b.due_left) || ' is due on ' || b.bill_no; end if;
+  if v_m not in ('cash', 'upi', 'card') then raise exception 'Choose how it was paid'; end if;
+  insert into due_payments (bill_id, customer_id, amount, mode, note, created_by)
+  values (b.id, b.customer_id, v_a, v_m, nullif(left(trim(coalesce(p->>'note', '')), 200), ''), auth.jwt() ->> 'email')
+  returning * into r;
+  update bills set due_cleared = due_cleared + v_a where id = b.id;
+  return r;
+end $$;
+
+revoke execute on function collect_due(jsonb) from public, anon;
+grant  execute on function collect_due(jsonb) to authenticated;

@@ -7,18 +7,20 @@ import { BillView } from '../components/BillView';
 import { payText } from '../components/Receipt';
 import { WA_SHORT } from '../lib/whatsapp';
 import { Expenses, CashClose } from './Cash';
+import { Dues } from './Dues';
 
 export default function Bills({ onOpenBill }) {
   const [tab, setTab] = useState('bills');
   return (
     <div className="page">
-      <div className="page-head"><h1>{tab === 'bills' ? 'Bills' : tab === 'exp' ? 'Expenses' : 'Cash close'}</h1></div>
+      <div className="page-head"><h1>{tab === 'bills' ? 'Bills' : tab === 'exp' ? 'Expenses' : tab === 'dues' ? 'Dues' : 'Cash close'}</h1></div>
       <div className="tabs" id="bills-tabs">
-        {[['bills', 'Bills'], ['exp', 'Expenses'], ['close', 'Cash close']].map(([k, l]) => (
+        {[['bills', 'Bills'], ['dues', 'Dues'], ['exp', 'Expenses'], ['close', 'Cash close']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
       {tab === 'bills' && <BillsList onOpenBill={onOpenBill} />}
+      {tab === 'dues' && <Dues />}
       {tab === 'exp' && <Expenses />}
       {tab === 'close' && <CashClose />}
     </div>
@@ -80,11 +82,12 @@ function BillsList({ onOpenBill }) {
 
       <div className="stats" style={{ marginBottom: 16 }}>
         <Stat k="Total sales" v={rupee(sum('total'))} s={`${paid.length} bills${cancelled ? ` · ${cancelled} cancelled` : ''}`} accent />
-        <Stat k="Cash" v={rupee(sum('paid_cash'))} s="Count it in Cash close" />
-        <Stat k="UPI" v={rupee(sum('paid_upi'))} />
+        <Stat k="Cash" v={rupee(round2(sum('paid_cash') + sum('change_upi')))} s={sum('change_upi') ? `incl. ${rupee(sum('change_upi'))} change sent by UPI` : 'Count it in Cash close'} />
+        <Stat k="UPI" v={rupee(round2(sum('paid_upi') - sum('change_upi')))} s={sum('change_upi') ? 'after the change sent back' : undefined} />
         <Stat k="Card" v={rupee(sum('paid_card'))} />
         <Stat k="Discounts" v={rupee(sum('discount'))} s={sum('paid_points') ? `${rupee(sum('paid_points'))} paid with points` : undefined} />
         <Stat k="New customers" v={paid.filter((b) => b.is_new_customer).length} />
+        {sum('paid_due') > 0 && <Stat k="Left as due" v={rupee(sum('paid_due'))} s="Pays later: see Dues" />}
       </div>
 
       <div className="card">
