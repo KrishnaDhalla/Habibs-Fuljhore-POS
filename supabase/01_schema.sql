@@ -1022,6 +1022,15 @@ begin
           coalesce((p->>'paid_card')::numeric, 0), v_use, v_earn, v_note, nullif(p->>'created_by', ''), v_sp.for_staff)
   returning * into v_bill;
 
+  -- A corrected bill ("Correct items" in the app): it replaces a bill the owner just cancelled. Linked both ways.
+  if coalesce(p->>'replaces', '') ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
+    update bills set replaced_by = v_bill.id
+     where id = (p->>'replaces')::uuid and status = 'cancelled' and replaced_by is null;
+    if found then
+      update bills set replaces = (p->>'replaces')::uuid where id = v_bill.id returning * into v_bill;
+    end if;
+  end if;
+
   -- 4. Items (+ stock out for products). A service, product, staff member or offer deleted
   --    while this bill waited offline is kept by name only, so the bill still uploads.
   for it in select * from jsonb_array_elements(p->'items') loop
@@ -3791,3 +3800,166 @@ revoke execute on function backup_alert()                   from public, anon;
 grant  execute on function backup_alert()                   to authenticated;
 revoke execute on function mark_backup_downloaded(uuid)     from public, anon;
 grant  execute on function mark_backup_downloaded(uuid)     to authenticated;
+-- =====================================================================
+-- Editing a saved bill (November 2026): the owner only (an owner login, or the counter unlocked by the owner)
+--   A bill is a tax invoice, so its items and amounts never change. edit_bill() changes only what doesn't change
+--   the money, and keeps every change in bill_edits (who, when, why, before → after):
+--     * the customer's name, and the mobile number: the visit and the points the bill earned move to the right
+--       customer (not when points were used on it, not for a staff member's own bill or to a staff number)
+--     * who did each service (commission follows), unless that month's salary is already paid to either person
+--     * how it was paid (cash / UPI / card, the same total), unless that time's cash is already closed
+--     * the note
+--   Wrong items or prices: "Correct items" in the app cancels the bill ("Corrected: …") and opens a new bill with
+--   its lines; create_bill() links the two (bills.replaces / replaced_by).
+-- =====================================================================
+alter table bills add column if not exists edited_at   timestamptz;
+alter table bills add column if not exists replaces    uuid references bills(id);
+alter table bills add column if not exists replaced_by uuid references bills(id);
+
+create table if not exists bill_edits (
+  id         uuid primary key default gen_random_uuid(),
+  bill_id    uuid not null references bills(id) on delete cascade,
+  edited_at  timestamptz not null default now(),
+  edited_by  text,
+  reason     text not null,
+  changes    jsonb not null           -- {"customer_phone": [old, new], "staff": [{"line": …, "from": …, "to": …}], …}
+);
+create index if not exists bill_edits_bill_idx on bill_edits (bill_id, edited_at);
+alter table bill_edits enable row level security;
+drop policy if exists "app users read" on bill_edits;
+create policy "app users read" on bill_edits for select to authenticated using ((select session_ok()));
+
+create or replace function edit_bill(p_id uuid, p jsonb) returns bills
+language plpgsql security definer set search_path = public as $$
+declare
+  b        bills;
+  v_reason text := nullif(left(trim(coalesce(p->>'reason', '')), 200), '');
+  v_ch     jsonb := '{}'::jsonb;
+  v_who    text := coalesce(auth.jwt() ->> 'email', 'owner');
+  v_phone  text;
+  v_name   text;
+  v_new    customers;
+  v_old    uuid;
+  v_month  text;
+  v_staff  jsonb := '[]'::jsonb;
+  it       jsonb;
+  li       bill_items;
+  st       staff;
+  v_c      numeric; v_u numeric; v_k numeric;
+  v_mode   text;
+  v_note   text;
+  v_uuid   text := '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
+  m        text;
+begin
+  if not owner_ok() then raise exception 'Only the owner can edit a bill'; end if;
+  select * into b from bills where id = p_id for update;
+  if not found then raise exception 'Bill not found'; end if;
+  if b.status <> 'paid' then raise exception 'A cancelled bill can''t be edited'; end if;
+  if v_reason is null then raise exception 'Write why the bill is being changed'; end if;
+
+  -- 1. The mobile number: the visit and the points it earned move to the right customer
+  if p ? 'customer_phone' then
+    v_phone := nullif(regexp_replace(coalesce(p->>'customer_phone', ''), '\D', '', 'g'), '');
+    if v_phone is distinct from b.customer_phone then
+      if v_phone is not null and v_phone !~ '^[6-9][0-9]{9}$' then raise exception 'The mobile number must be 10 digits'; end if;
+      if b.for_staff is not null then raise exception 'This is a staff member''s own bill (staff prices). Use Correct items instead.'; end if;
+      if v_phone is not null and exists (select 1 from staff where active and right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) = v_phone) then
+        raise exception 'That is a staff member''s number: their own bills have staff prices. Use Correct items instead.';
+      end if;
+      if b.paid_points > 0 then raise exception 'Points were used on this bill, so its number can''t change. Use Correct items instead.'; end if;
+      if b.points_earned > 0 and v_phone is null then raise exception 'This bill earned points, so it needs a mobile number'; end if;
+      if b.points_earned > 0 and b.customer_id is not null and (select points from customers where id = b.customer_id) < b.points_earned then
+        raise exception 'The points this bill earned were already used by that customer. Use Correct items instead.';
+      end if;
+      v_old := b.customer_id;
+      if v_phone is not null then
+        insert into customers (phone, name) values (v_phone, nullif(trim(coalesce(p->>'customer_name', '')), '')) on conflict (phone) do nothing;
+        select * into v_new from customers where phone = v_phone;
+      end if;
+      if b.points_earned > 0 then
+        insert into loyalty_points (customer_id, bill_id, kind, points, note, created_by)
+        values (v_old, b.id, 'adjust', -b.points_earned, 'Bill ' || b.bill_no || ' moved to ' || v_phone, v_who),
+               (v_new.id, b.id, 'adjust', b.points_earned, 'Bill ' || b.bill_no || ' moved from ' || coalesce(b.customer_phone, 'no number'), v_who);
+      end if;
+      update bills set customer_id = v_new.id, customer_phone = v_phone, points_balance = null where id = b.id;
+      if v_old is not null then perform refresh_customer_stats(v_old); end if;
+      if v_new.id is not null then perform refresh_customer_stats(v_new.id); end if;
+      v_ch := v_ch || jsonb_build_object('customer_phone', jsonb_build_array(b.customer_phone, v_phone));
+      select * into b from bills where id = p_id;
+    end if;
+  end if;
+
+  -- 2. The name (on the bill, and the customer's own record)
+  if p ? 'customer_name' then
+    v_name := nullif(left(trim(coalesce(p->>'customer_name', '')), 80), '');
+    if v_name is distinct from nullif(b.customer_name, '') then
+      update bills set customer_name = v_name where id = b.id;
+      if b.customer_id is not null and v_name is not null then update customers set name = v_name where id = b.customer_id; end if;
+      v_ch := v_ch || jsonb_build_object('customer_name', jsonb_build_array(nullif(b.customer_name, ''), v_name));
+    end if;
+  end if;
+
+  -- 3. Who did each service: commission follows, unless that month's salary is already paid
+  if jsonb_typeof(p->'items') = 'array' then
+    v_month := to_char(b.created_at at time zone 'Asia/Kolkata', 'YYYY-MM');
+    for it in select * from jsonb_array_elements(p->'items') loop
+      select * into li from bill_items where id = case when it->>'id' ~ v_uuid then (it->>'id')::uuid end and bill_id = b.id;
+      if li.id is null then raise exception 'That line is not on this bill'; end if;
+      st := null;
+      if coalesce(it->>'staff_id', '') <> '' then
+        select * into st from staff where id = case when it->>'staff_id' ~ v_uuid then (it->>'staff_id')::uuid end;
+        if st.id is null then raise exception 'Choose a staff member on the list'; end if;
+      end if;
+      continue when st.id is not distinct from li.staff_id;
+      if exists (select 1 from payslips where month = v_month and status = 'paid' and staff_id in (li.staff_id, st.id)) then
+        raise exception '%', 'The salary for ' || to_char(b.created_at at time zone 'Asia/Kolkata', 'FMMonth YYYY')
+                             || ' is already paid, so who did ' || li.name || ' can''t change now';
+      end if;
+      update bill_items set staff_id = st.id, staff_name = st.name where id = li.id;
+      v_staff := v_staff || jsonb_build_array(jsonb_build_object('line', li.name, 'from', li.staff_name, 'to', st.name));
+    end loop;
+    if jsonb_array_length(v_staff) > 0 then v_ch := v_ch || jsonb_build_object('staff', v_staff); end if;
+  end if;
+
+  -- 4. How it was paid: the same total; not once that time's cash is closed
+  if p ? 'paid_cash' or p ? 'paid_upi' or p ? 'paid_card' then
+    foreach m in array array['paid_cash', 'paid_upi', 'paid_card'] loop
+      if coalesce(p->>m, '0') !~ '^[0-9]+(\.[0-9]{1,2})?$' then raise exception 'Type the amounts paid'; end if;
+    end loop;
+    v_c := coalesce((p->>'paid_cash')::numeric, 0); v_u := coalesce((p->>'paid_upi')::numeric, 0); v_k := coalesce((p->>'paid_card')::numeric, 0);
+    if (v_c, v_u, v_k) is distinct from (b.paid_cash, b.paid_upi, b.paid_card) then
+      if v_c + v_u + v_k <> b.total - b.paid_points then
+        raise exception '%', 'Cash, UPI and card must add up to ₹' || trim_scale(b.total - b.paid_points);
+      end if;
+      if exists (select 1 from cash_closes where closed_at >= b.created_at) then
+        raise exception 'The cash for that time is already closed, so how this bill was paid can''t change now';
+      end if;
+      v_mode := case when (v_c > 0)::int + (v_u > 0)::int + (v_k > 0)::int > 1 then 'Split'
+                     when v_u > 0 then 'UPI' when v_k > 0 then 'Card' else 'Cash' end;
+      update bills set paid_cash = v_c, paid_upi = v_u, paid_card = v_k, pay_mode = v_mode where id = b.id;
+      delete from bill_payments where bill_id = b.id and mode in ('cash', 'upi', 'card');
+      insert into bill_payments (bill_id, created_at, mode, amount)
+      select b.id, b.created_at, x.mode, x.amount from (values ('cash', v_c), ('upi', v_u), ('card', v_k)) x(mode, amount) where x.amount > 0;
+      v_ch := v_ch || jsonb_build_object('payment', jsonb_build_array(
+                jsonb_build_object('mode', b.pay_mode, 'cash', b.paid_cash, 'upi', b.paid_upi, 'card', b.paid_card),
+                jsonb_build_object('mode', v_mode, 'cash', v_c, 'upi', v_u, 'card', v_k)));
+    end if;
+  end if;
+
+  -- 5. The note
+  if p ? 'note' then
+    v_note := nullif(left(trim(coalesce(p->>'note', '')), 300), '');
+    if v_note is distinct from nullif(b.note, '') then
+      update bills set note = v_note where id = b.id;
+      v_ch := v_ch || jsonb_build_object('note', jsonb_build_array(nullif(b.note, ''), v_note));
+    end if;
+  end if;
+
+  if v_ch = '{}'::jsonb then raise exception 'Nothing was changed'; end if;
+  update bills set edited_at = now() where id = b.id returning * into b;
+  insert into bill_edits (bill_id, edited_by, reason, changes) values (b.id, v_who, v_reason, v_ch);
+  return b;
+end $$;
+
+revoke execute on function edit_bill(uuid, jsonb) from public, anon;
+grant  execute on function edit_bill(uuid, jsonb) to authenticated;

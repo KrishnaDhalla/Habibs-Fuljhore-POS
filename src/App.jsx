@@ -339,7 +339,7 @@ function Shell({ onSignOut }) {
       <main className="main">
         {page === 'bill' && <Billing hasBanner={banner} />}
         {page === 'appts' && <Appointments onOpenBill={() => go('bill')} onCounts={setAppts} />}
-        {page === 'bills' && <Bills />}
+        {page === 'bills' && <Bills onOpenBill={() => go('bill')} />}
         {page === 'customers' && <Customers />}
         {page === 'staff' && <Staff onCounts={(c) => setStaffWait(c.leave)} />}
         {page === 'stock' && <Inventory />}

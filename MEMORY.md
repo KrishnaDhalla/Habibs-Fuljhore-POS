@@ -9,6 +9,57 @@ done in Supabase for it to work. Keep this file up to date when something change
 
 ---
 
+## 5. Edit a saved bill, and Correct items (owner only)
+
+**Branch:** `test` · **Date:** 12 Nov 2026
+
+### Why
+A receptionist in a hurry types something wrong and there was no way to fix a saved bill except cancel it.
+
+### What it does
+A bill is a tax invoice, so its **items, prices and total never change after saving**. Two owner-only buttons
+on a bill (Bills → the bill), next to Cancel:
+
+**Edit** (the bill keeps its number). The owner can change:
+- **Customer name**: on the bill and the customer's record.
+- **Mobile number**: the visit and the loyalty points the bill earned move to the right customer (both
+  customers' visits, spend and points recalculated). Not allowed: when points were used on the bill, on a staff
+  member's own bill, to a staff member's number (staff prices), or to no number when the bill earned points, or
+  when the old customer already spent the points it earned. → use Correct items.
+- **Who did each service**: commission in payroll follows. Not once that month's salary is marked paid to either
+  the old or the new person.
+- **How it was paid** (cash / UPI / card, must add up to the same total; points stay): pay mode becomes Cash, UPI,
+  Card or Split. Not once that time's cash is closed (the drawer count would no longer match).
+- **Note**.
+- A **reason** is required. Every edit is kept in `bill_edits` (who, when, why, before → after) and shown on the bill
+  under "Changed after saving".
+
+**Correct items** (wrong service, product, price or quantity):
+1. Asks what was wrong, then cancels the bill as "Corrected: …" (stock and points go back, as with any cancel).
+2. New bill opens pre-filled with the same customer and items, with a "Correcting HF…" card.
+3. Fix it, choose how it was paid, save: the new bill gets the next number, its note says "Replaces HF…", and
+   the two are linked (`bills.replaces` / `replaced_by`); the old one shows "replaced by HF…".
+Offers and points work out again as for any new bill (an offer that has ended won't apply).
+
+### Files
+- `supabase/01_schema.sql`: new section at the end: `bills.edited_at`, `replaces`, `replaced_by`; table
+  `bill_edits` (app users read); `edit_bill(uuid, jsonb)` (owner_ok only). `create_bill()` links `p.replaces`
+  (only a cancelled bill not already replaced).
+- `src/lib/billEdit.js` (new): `editChanges()` (only what changed), `editProblem()`, `editSummary()` (history line),
+  `correctionDraft()` (the New bill draft).
+- `src/components/BillView.jsx`: Edit / Correct items buttons, `EditBill` form, the history, the links.
+- `src/pages/Billing.jsx`: `replaces` in the draft, the "Correcting" card, `replaces` sent with the bill.
+- `src/pages/Bills.jsx`, `src/App.jsx`: Correct items opens New bill.
+- `src/lib/localdb.js`: demo `edit_bill`, `bill_edits`, `replaces`.
+- Tests: `tests/db.test.mjs` (counter refused, reason needed, name, staff, salary paid, payments add up, split,
+  cash closed, number moves visit and points, staff number refused, history, cancelled bill, correction links,
+  replaced once, only a cancelled bill).
+
+### To make it work
+Supabase SQL Editor: run `supabase/01_schema.sql` again. No function to deploy. Reload the app.
+
+---
+
 ## 4. Combo offers and the Combos tab in New bill
 
 **Branch:** `test` · **Date:** 12 Nov 2026 · **From:** the Grand Opening + Diwali flyer (1–15 Nov)

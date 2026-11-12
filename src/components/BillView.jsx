@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { Printer, MessageCircle, Ban, Share2, Copy, Download, Send, RotateCcw } from 'lucide-react';
+import { Printer, MessageCircle, Ban, Share2, Copy, Download, Send, RotateCcw, Pencil, Wrench } from 'lucide-react';
 import { db, IS_DEMO } from '../lib/db';
 import { useApp } from '../store';
-import { Modal, Field, Loading } from './ui';
+import { Modal, Field, Loading, MoneyInput } from './ui';
 import { Receipt, printBill, billWhatsAppText, waUrl } from './Receipt';
-import { rupee, fmtPhone, canDownload, NO_DOWNLOAD } from '../lib/format';
+import { rupee, fmtPhone, canDownload, NO_DOWNLOAD, fmtDateTime, uid, round2 } from '../lib/format';
+import { editChanges, editProblem, editSummary, correctionDraft } from '../lib/billEdit';
 import { receiptImage, billFileName } from '../lib/receiptImage';
 import { billChatText } from '../lib/receiptRows';
 import { waBillsOn, sendBillOnWhatsApp, WA_STATUS } from '../lib/whatsapp';
 
-// Shows one bill with Print / WhatsApp / Cancel. Used after saving and from the Bills list.
-export function BillView({ bill: initial, items: initialItems, onClose, onChanged, title, extraFoot, autoWa }) {
+// Shows one bill with Print / WhatsApp / Cancel, and for the owner Edit / Correct items. Used after saving and from
+// the Bills list. onCorrect: the New bill screen opens with the corrected bill (Bills passes it).
+export function BillView({ bill: initial, items: initialItems, onClose, onChanged, onCorrect, title, extraFoot, autoWa }) {
   const { settings, askOwner, toast, loadProducts } = useApp();
   const [bill, setBill] = useState(initial);
   const [items, setItems] = useState(initialItems || null);
@@ -19,10 +21,58 @@ export function BillView({ bill: initial, items: initialItems, onClose, onChange
   const [busy, setBusy] = useState(false);
   const [wa, setWa] = useState(false);
   const [waKick, setWaKick] = useState(0);   // WhatsApp bills on: the button sends through the API, no chat to open
+  const [editing, setEditing] = useState(false);
+  const [correcting, setCorrecting] = useState(false);
+  const [edits, setEdits] = useState([]);
+  const [links, setLinks] = useState({});    // { replaces: 'HF2627-0041', replaced_by: 'HF2627-0050' }
 
   useEffect(() => {
     if (!initialItems) db.list('bill_items', { eq: { bill_id: initial.id }, order: ['created_at', 'asc'] }).then(setItems);
   }, [initial.id, initialItems]);
+  // The change history, and the bills a correction links
+  useEffect(() => {
+    if (bill._pending) return;
+    if (bill.edited_at) db.list('bill_edits', { eq: { bill_id: bill.id }, order: ['edited_at', 'asc'] }).then(setEdits).catch(() => setEdits([]));
+    for (const k of ['replaces', 'replaced_by']) {
+      if (bill[k]) db.get('bills', bill[k]).then((x) => x && setLinks((l) => ({ ...l, [k]: x.bill_no }))).catch(() => {});
+    }
+  }, [bill.id, bill.edited_at, bill.replaces, bill.replaced_by]);
+
+  const canFix = bill.status === 'paid' && !bill._pending && !extraFoot;
+  const startEdit = async () => {
+    if (!(await askOwner('Only the owner can edit a bill.'))) return;
+    setEditing(true);
+  };
+  const startCorrect = async () => {
+    if (!(await askOwner('Only the owner can correct a bill.'))) return;
+    setReason('');
+    setCorrecting(true);
+  };
+  // Correct items: cancel this bill ("Corrected: …"), then New bill opens with its lines to fix and save
+  const doCorrect = async () => {
+    if (!reason.trim() || !items) return;
+    try {
+      const cur = JSON.parse(localStorage.getItem('habibs-pos-draft') || '{}');
+      if (cur.lines && cur.lines.length && !window.confirm('A bill is already being made on the New bill screen. Replace it with this correction?')) return;
+    } catch { /* ignore */ }
+    const ok = await askOwner('Only the owner can correct a bill.', {
+      action: 'cancel', ref: bill.id, detail: `Correct bill ${bill.bill_no} · ${rupee(bill.total)} · ${reason.trim()}`,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const b = await db.rpc('cancel_bill', { p_id: bill.id, p_reason: 'Corrected: ' + reason.trim() });
+      localStorage.setItem('habibs-pos-draft', JSON.stringify(correctionDraft(b, items, uid)));
+      loadProducts();
+      toast(`Bill ${b.bill_no} cancelled. Fix the new bill and save it.`, 'ok');
+      setCorrecting(false);
+      if (onCorrect) onCorrect(); else onChanged && onChanged(b);
+    } catch (e) {
+      toast(e.message, 'bad');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const print = () => {
     if (IS_DEMO && window.self !== window.top) {
@@ -59,6 +109,47 @@ export function BillView({ bill: initial, items: initialItems, onClose, onChange
     }
   };
 
+  if (editing && items) {
+    return (
+      <EditBill bill={bill} items={items} onClose={() => setEditing(false)}
+        onSaved={async (b) => {
+          setBill(b);
+          setEditing(false);
+          setItems(await db.list('bill_items', { eq: { bill_id: b.id }, order: ['created_at', 'asc'] }).catch(() => items));
+          toast('Bill ' + b.bill_no + ' changed', 'ok');
+          onChanged && onChanged(b, { keepOpen: true });
+        }} />
+    );
+  }
+
+  if (correcting) {
+    return (
+      <Modal
+        title={'Correct items: ' + bill.bill_no}
+        onClose={() => setCorrecting(false)}
+        foot={
+          <>
+            <button className="btn line" onClick={() => setCorrecting(false)}>Back</button>
+            <button className="btn danger" id="correct-go" disabled={!reason.trim() || busy || !items} onClick={doCorrect}><Wrench size={16} /> Cancel and open the new bill</button>
+          </>
+        }
+      >
+        <div className="stack">
+          <p>For a wrong service, product, price or quantity. A tax invoice's items can't be changed, so:</p>
+          <ol className="small" style={{ margin: 0, paddingLeft: 20 }}>
+            <li><b>{bill.bill_no}</b> ({rupee(bill.total)}) is cancelled as "Corrected". It stays in the records; stock and points go back.</li>
+            <li><b>New bill</b> opens with the same customer and items. Fix them, choose how it was paid, and save it.</li>
+            <li>The new bill gets the next number and says which bill it replaces.</li>
+          </ol>
+          <p className="small muted" style={{ margin: 0 }}>Only the customer, who did a service, how it was paid or the note wrong? Use <b>Edit</b> instead: the bill keeps its number.</p>
+          <Field label="What was wrong">
+            <input className="input" id="correct-reason" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Keratin billed as S, it was L" />
+          </Field>
+        </div>
+      </Modal>
+    );
+  }
+
   if (cancelling) {
     return (
       <Modal
@@ -90,6 +181,12 @@ export function BillView({ bill: initial, items: initialItems, onClose, onChange
           {bill.status === 'paid' && !extraFoot && (
             <button className="btn danger" onClick={startCancel}><Ban size={16} /> Cancel bill</button>
           )}
+          {canFix && items && (
+            <>
+              <button className="btn line" id="bill-edit" onClick={startEdit} title="Owner only"><Pencil size={15} /> Edit</button>
+              <button className="btn line" id="bill-correct" onClick={startCorrect} title="Owner only"><Wrench size={15} /> Correct items</button>
+            </>
+          )}
           <span className="grow" />
           {items && bill.customer_phone && (
             <button className="btn wa" id="bill-wa" onClick={() => (waBillsOn(settings) && bill.status === 'paid' && !bill._pending ? setWaKick((k) => k + 1) : setWa(true))}>
@@ -105,7 +202,19 @@ export function BillView({ bill: initial, items: initialItems, onClose, onChange
         <p className="pill warn" style={{ marginBottom: 12 }}>Saved on this device. Uploads when the internet is back.</p>
       )}
       {bill.status === 'cancelled' && (
-        <p className="pill bad" style={{ marginBottom: 12 }}>Cancelled{bill.cancel_reason ? ': ' + bill.cancel_reason : ''}</p>
+        <p className="pill bad" style={{ marginBottom: 12 }}>Cancelled{bill.cancel_reason ? ': ' + bill.cancel_reason : ''}{links.replaced_by ? ` · replaced by ${links.replaced_by}` : ''}</p>
+      )}
+      {bill.replaces && <p className="pill warn" style={{ marginBottom: 12 }}>Corrected bill: replaces {links.replaces || 'a cancelled bill'}</p>}
+      {edits.length > 0 && (
+        <div className="sub-card small stack tight" id="bill-edits" style={{ marginBottom: 12 }}>
+          <b>Changed after saving</b>
+          {edits.map((e) => (
+            <div key={e.id}>
+              <span className="muted">{fmtDateTime(e.edited_at)} · {e.edited_by}:</span> {e.reason}
+              <div className="tiny muted">{editSummary(e.changes)}</div>
+            </div>
+          ))}
+        </div>
       )}
       {items && bill.customer_phone && <WaApi bill={bill} items={items} settings={settings} auto={autoWa} kick={waKick} onTwoTaps={() => setWa(true)} />}
       {items ? <Receipt bill={bill} items={items} settings={settings} /> : <Loading />}
@@ -270,5 +379,83 @@ function WaApi({ bill, items, settings, auto, kick, onTwoTaps }) {
         </button>
       )}
     </div>
+  );
+}
+
+// Edit a saved bill (owner only): the customer, who did each service, how it was paid, the note. The money on it
+// (items, prices, total) doesn't change: for that, Correct items. The database checks it all again (edit_bill).
+function EditBill({ bill, items, onClose, onSaved }) {
+  const { staff, toast } = useApp();
+  const [f, setF] = useState({
+    name: bill.customer_name || '', phone: bill.customer_phone || '',
+    staff: Object.fromEntries(items.map((l) => [l.id, l.staff_id || ''])),
+    cash: String(Number(bill.paid_cash) || ''), upi: String(Number(bill.paid_upi) || ''), card: String(Number(bill.paid_card) || ''),
+    note: bill.note || '', reason: '',
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const due = round2(Number(bill.total) - Number(bill.paid_points || 0));
+  const paid = round2((Number(f.cash) || 0) + (Number(f.upi) || 0) + (Number(f.card) || 0));
+  const problem = editProblem(bill, items, f);
+  const pick = (l) => [...staff.filter((s) => s.active || s.id === l.staff_id)];
+  const save = async () => {
+    if (problem) return setErr(problem);
+    setBusy(true);
+    setErr('');
+    try {
+      const b = await db.rpc('edit_bill', { p_id: bill.id, p: editChanges(bill, items, f) });
+      await onSaved(b);
+    } catch (e) {
+      setErr(e.message);
+      toast(e.message, 'bad');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal wide title={'Edit bill ' + bill.bill_no} onClose={onClose}
+      foot={<><button className="btn line" onClick={onClose}>Back</button><span className="grow" /><button className="btn primary" id="edit-save" disabled={busy || !!problem} onClick={save}>Save changes</button></>}>
+      <div className="stack">
+        <p className="small muted" style={{ margin: 0 }}>
+          The items, prices and total stay as they are (a tax invoice). Every change is kept on the bill with your reason.
+          Wrong items or prices? Go back and use <b>Correct items</b>.
+        </p>
+        <div className="form-grid">
+          <Field label="Customer name"><input className="input" id="edit-name" value={f.name} maxLength={80} onChange={(e) => set('name', e.target.value)} /></Field>
+          <Field label="Mobile" hint={Number(bill.paid_points) > 0 ? "Points were used: the number can't change" : 'The visit and the points it earned move with it'}>
+            <input className="input" id="edit-phone" inputMode="numeric" value={f.phone} disabled={Number(bill.paid_points) > 0 || !!bill.for_staff}
+              onChange={(e) => set('phone', e.target.value.replace(/\D/g, '').slice(0, 10))} />
+          </Field>
+        </div>
+        <div className="stack tight">
+          <div className="sec-title">Who did it</div>
+          {items.map((l) => (
+            <div key={l.id} className="row between wrap" style={{ gap: 8 }}>
+              <span className="small grow">{l.name}{Number(l.qty) > 1 ? ` × ${Number(l.qty)}` : ''}</span>
+              <select className="input" style={{ maxWidth: 240, height: 40 }} data-line={l.name} value={f.staff[l.id]} onChange={(e) => setF((x) => ({ ...x, staff: { ...x.staff, [l.id]: e.target.value } }))}>
+                <option value="">Nobody</option>
+                {pick(l).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          ))}
+          <span className="tiny muted">Commission follows. Not once that month's salary is paid to either person.</span>
+        </div>
+        {due > 0 && (
+          <div className="stack tight">
+            <div className="sec-title">How it was paid {Number(bill.paid_points) > 0 ? `(₹${Number(bill.paid_points)} with points stays)` : ''}</div>
+            <div className="form-grid">
+              <Field label="Cash"><MoneyInput id="edit-cash" value={f.cash} onChange={(v) => set('cash', v)} placeholder="0" /></Field>
+              <Field label="UPI"><MoneyInput id="edit-upi" value={f.upi} onChange={(v) => set('upi', v)} placeholder="0" /></Field>
+              <Field label="Card"><MoneyInput id="edit-card" value={f.card} onChange={(v) => set('card', v)} placeholder="0" /></Field>
+            </div>
+            <span className={'tiny ' + (paid === due ? 'muted' : 'warn-text')}>Must add up to {rupee(due)}{paid !== due ? ` (now ${rupee(paid)})` : ''}. Not once that time's cash is closed.</span>
+          </div>
+        )}
+        <Field label="Note"><input className="input" id="edit-note" value={f.note} maxLength={300} onChange={(e) => set('note', e.target.value)} /></Field>
+        <Field label="Why the change (kept on the bill)"><input className="input" id="edit-reason" value={f.reason} maxLength={200} onChange={(e) => set('reason', e.target.value)} placeholder="e.g. Wrong number typed; paid by UPI, not cash" /></Field>
+        {(err || (problem && problem !== 'Nothing is changed yet.' && problem !== 'Write why the bill is being changed.')) && <p className="err-text small">{err || problem}</p>}
+      </div>
+    </Modal>
   );
 }

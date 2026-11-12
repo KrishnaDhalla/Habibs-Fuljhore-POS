@@ -1404,6 +1404,94 @@ for (const [t, want] of fyCases) {
   await q(`delete from alerts_sent where kind like 'day %'`);
 }
 {
+  // ---------- editing a saved bill (owner only) and correcting its items ----------
+  await q(`update settings set value = '20' where key = 'max_discount_pct'`);
+  const C = (sql, p) => as(clerk, sClerk, () => tryq(sql, p));
+  const O = (sql, p) => as(owner, sOwner, () => tryq(sql, p));
+  const svcA = services.find((s) => !s.variants && !s.open_price && Number(s.price) >= 500);
+  const svcB = services.find((s) => s !== svcA && !s.variants && !s.open_price && Number(s.price) >= 300);
+  const A = '9812300001', B = '9812300002';
+  const mk = (phone, pay = 'Cash') => {
+    const b = calcBill([svcA, svcB].map((s, i) => ({ id: i + 1, item_type: 'service', service_id: s.id, name: s.name, category: s.category, unit_price: Number(s.price), qty: 1, gst_pct: 5, staff_id: staff[0].id })), { gstOn: true, inclusive: true });
+    return { id: randomUUID(), customer_phone: phone, customer_name: 'Riya Sen', subtotal: b.subtotal, offer_discount: 0, discount: 0, taxable: b.taxable, cgst: b.cgst, sgst: b.sgst,
+      round_off: b.round_off, total: b.total, pay_mode: pay, paid_cash: pay === 'Cash' ? b.total : 0, paid_upi: pay === 'UPI' ? b.total : 0, paid_card: 0,
+      items: b.items.map((l) => ({ ...l, staff_name: staff[0].name, offer_id: '', offer_name: '', offer_discount: 0 })) };
+  };
+  const [bill] = await C(`select * from create_bill($1)`, [JSON.stringify(mk(A))]);
+  const lines = await q(`select * from bill_items where bill_id = $1 order by name`, [bill.id]);
+  const ed = (who, p) => who(`select * from edit_bill($1, $2)`, [bill.id, JSON.stringify(p)]);
+  const pts = async (ph) => (await q(`select points, visits from customers where phone = $1`, [ph]))[0] || {};
+  check('edit: the bill earned points for A', bill.points_earned > 0 && (await pts(A)).points === bill.points_earned, JSON.stringify(bill));
+  check('edit: the counter cannot edit a bill', /Only the owner/.test((await ed(C, { reason: 'x', note: 'hi' })).error || ''));
+  check('edit: a reason is needed', /Write why/.test((await ed(O, { note: 'hi' })).error || ''));
+  check('edit: nothing changed → says so', /Nothing was changed/.test((await ed(O, { reason: 'x', note: '' })).error || ''));
+  // the name
+  let r = await ed(O, { reason: 'Spelling', customer_name: 'Riya Sengupta' });
+  check('edit: the name, on the bill and the customer', !r.error && r[0].customer_name === 'Riya Sengupta' && r[0].edited_at
+    && (await q(`select name from customers where phone = $1`, [A]))[0].name === 'Riya Sengupta', JSON.stringify(r));
+  // who did it
+  r = await ed(O, { reason: 'Priya did the second one', items: [{ id: lines[1].id, staff_id: staff[1].id }] });
+  const l2 = (await q(`select staff_id, staff_name from bill_items where id = $1`, [lines[1].id]))[0];
+  check('edit: who did a service (commission follows)', !r.error && l2.staff_id === staff[1].id && l2.staff_name === staff[1].name, JSON.stringify([r, l2]));
+  check('edit: a line from another bill is refused', /not on this bill/.test((await ed(O, { reason: 'x', items: [{ id: randomUUID(), staff_id: staff[1].id }] })).error || ''));
+  const month = (await q(`select to_char(created_at at time zone 'Asia/Kolkata', 'YYYY-MM') m from bills where id = $1`, [bill.id]))[0].m;
+  await q(`insert into payslips (staff_id, month, days_in_month, paid_days, monthly_salary, salary_earned, net_pay, status) values ($1, $2, 30, 30, 10000, 10000, 10000, 'paid')`, [staff[2].id, month]);
+  check('edit: not to someone whose salary for that month is already paid', /already paid/.test((await ed(O, { reason: 'x', items: [{ id: lines[0].id, staff_id: staff[2].id }] })).error || ''));
+  await q(`delete from payslips where staff_id = $1 and month = $2`, [staff[2].id, month]);
+  // how it was paid
+  check('edit: the payments must add up to the total', /must add up to/.test((await ed(O, { reason: 'x', paid_cash: 0, paid_upi: 1, paid_card: 0 })).error || ''));
+  r = await ed(O, { reason: 'Paid by UPI', paid_cash: 0, paid_upi: Number(bill.total), paid_card: 0 });
+  const bp = await q(`select mode, amount::float a from bill_payments where bill_id = $1`, [bill.id]);
+  check('edit: cash → UPI, the same total; the payment rows follow', !r.error && r[0].pay_mode === 'UPI' && Number(r[0].paid_upi) === Number(bill.total) && Number(r[0].paid_cash) === 0
+    && bp.length === 1 && bp[0].mode === 'upi' && bp[0].a === Number(bill.total), JSON.stringify([r, bp]));
+  const half = Math.round(Number(bill.total) * 50) / 100;
+  r = await ed(O, { reason: 'Part cash', paid_cash: half, paid_upi: Math.round((Number(bill.total) - half) * 100) / 100, paid_card: 0 });
+  check('edit: a split is "Split"', !r.error && r[0].pay_mode === 'Split', JSON.stringify(r));
+  await q(`insert into cash_closes (day, closed_at, expected, counted, difference, closing_cash) values (current_date + 400, now(), 0, 0, 0, 0)`);
+  check('edit: not once that time\'s cash is closed', /already closed/.test((await ed(O, { reason: 'x', paid_cash: Number(bill.total), paid_upi: 0, paid_card: 0 })).error || ''));
+  check('edit: …the rest still can be', !(await ed(O, { reason: 'Note added', note: 'Regular customer' })).error);
+  await q(`delete from cash_closes where day = current_date + 400`);
+  // the mobile number: the visit and the points move
+  const before = await pts(A);
+  r = await ed(O, { reason: 'Wrong number typed', customer_phone: B });
+  const a2 = await pts(A), b2 = await pts(B);
+  check('edit: the number → the visit and the points it earned move to the right customer', !r.error && r[0].customer_phone === B
+    && a2.points === before.points - bill.points_earned && b2.points === bill.points_earned && a2.visits === 0 && b2.visits === 1, JSON.stringify([r, before, a2, b2]));
+  await q(`update staff set phone = '9812300099' where id = $1`, [staff[2].id]);
+  check('edit: not to a staff member\'s number (staff prices)', /staff member/.test((await ed(O, { reason: 'x', customer_phone: '9812300099' })).error || ''));
+  await q(`update staff set phone = null where id = $1`, [staff[2].id]);
+  check('edit: a bad number is refused', /10 digits/.test((await ed(O, { reason: 'x', customer_phone: '12345' })).error || ''));
+  check('edit: a bill that earned points needs a number', /needs a mobile number/.test((await ed(O, { reason: 'x', customer_phone: '' })).error || ''));
+  // the history
+  const h = await C(`select reason, changes from bill_edits where bill_id = $1 order by edited_at`, [bill.id]);
+  check('edit: every change kept with its reason (the counter can read it)', h.length === 6 && h[0].reason === 'Spelling' && h[0].changes.customer_name[1] === 'Riya Sengupta'
+    && h[1].changes.staff[0].to === staff[1].name && h[2].changes.payment[1].mode === 'UPI' && h[5].changes.customer_phone[1] === B, JSON.stringify(h));
+  const { editSummary, editChanges, editProblem, correctionDraft } = await import('../src/lib/billEdit.js');
+  check('edit (app): the history in one line', /Mobile 9812300001 → 9812300002/.test(editSummary(h[5].changes)) && /→ Priya Saha/.test(editSummary(h[1].changes)) && /Paid Cash → UPI/.test(editSummary(h[2].changes)), editSummary(h[2].changes));
+  // the app sends only what changed
+  const [cur] = await q(`select * from bills where id = $1`, [bill.id]);
+  const its = await q(`select * from bill_items where bill_id = $1 order by name`, [bill.id]);
+  const form = { name: cur.customer_name, phone: cur.customer_phone, staff: Object.fromEntries(its.map((l) => [l.id, l.staff_id])), cash: cur.paid_cash, upi: cur.paid_upi, card: cur.paid_card, note: cur.note, reason: '' };
+  check('edit (app): nothing changed → nothing to save', editProblem(cur, its, form) === 'Nothing is changed yet.');
+  const ch = editChanges(cur, its, { ...form, note: 'VIP', reason: 'Tag' });
+  check('edit (app): only what changed is sent', JSON.stringify(ch) === JSON.stringify({ reason: 'Tag', note: 'VIP' }), JSON.stringify(ch));
+  check('edit (app): payments that don\'t add up are caught before saving', /must add up/.test(editProblem(cur, its, { ...form, cash: 1, upi: 0, card: 0, reason: 'x' })));
+  // correct items: cancel, then a new bill that replaces it
+  const [cx] = await O(`select * from cancel_bill($1, $2)`, [bill.id, 'Corrected: wrong service']);
+  check('correct: the owner cancels it', cx && cx.status === 'cancelled', JSON.stringify(cx));
+  check('edit: a cancelled bill can\'t be edited', /cancelled bill/.test((await ed(O, { reason: 'x', note: 'y' })).error || ''));
+  const d = correctionDraft(cx, its, randomUUID);
+  check('correct (app): New bill opens with the customer, the lines and which bill it replaces', d.phone === B && d.lines.length === 2 && d.lines.every((l) => l.service_id && l.unit_price > 0) && d.replaces.id === bill.id && d.replaces.bill_no === bill.bill_no);
+  const fix = { ...mk(B), replaces: bill.id };
+  const [nb] = await C(`select * from create_bill($1)`, [JSON.stringify(fix)]);
+  const [old] = await q(`select replaced_by from bills where id = $1`, [bill.id]);
+  check('correct: the new bill replaces it, linked both ways', nb.replaces === bill.id && old.replaced_by === nb.id && nb.bill_no !== bill.bill_no, JSON.stringify([nb.replaces, old]));
+  const [nb2] = await C(`select * from create_bill($1)`, [JSON.stringify({ ...mk(B), replaces: bill.id })]);
+  check('correct: a bill can be replaced only once', !nb2.replaces, JSON.stringify(nb2.replaces));
+  const [nb3] = await C(`select * from create_bill($1)`, [JSON.stringify({ ...mk(B), replaces: nb.id })]);
+  check('correct: only a cancelled bill can be replaced', !nb3.replaces && !(await q(`select replaced_by from bills where id = $1`, [nb.id]))[0].replaced_by);
+}
+{
   // the app's bars (src/lib/alerts.js)
   const { failedBills, backupAlert } = await import('../src/lib/alerts.js');
   const now = Date.parse('2026-11-16T10:00:00Z');

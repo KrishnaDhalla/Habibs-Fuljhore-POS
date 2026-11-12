@@ -18,7 +18,7 @@ const KEY = 'habibs-pos-demo-v1';
 const TABLES = ['settings', 'services', 'customers', 'staff', 'attendance', 'staff_advances', 'payslips',
   'products', 'stock_moves', 'bills', 'bill_items', 'counters', 'offers', 'owner_grants', 'owner_secrets', 'service_usage',
   'service_categories', 'service_changes', 'bookings', 'booking_items', 'unit_ends', 'free_uses', 'unit_checks', 'enquiries',
-  'staff_faces', 'check_ins', 'staff_documents', 'leave_requests', 'doc_files', 'loyalty_points', 'wa_messages', 'expenses', 'cash_closes', 'feedback'];
+  'staff_faces', 'check_ins', 'staff_documents', 'leave_requests', 'doc_files', 'loyalty_points', 'wa_messages', 'expenses', 'cash_closes', 'feedback', 'bill_edits'];
 const VERSION = 8;
 const DEMO_FILES_MAX = 4500000; // the browser keeps about 5 MB for the demo, files included
 // A grey face shape: the photo of the example check-ins
@@ -557,7 +557,95 @@ export function createLocalDb() {
       refreshCustomer(cust.id);
     }
     linkVisit(T, bill); // a booking that day for this phone: they came (same as link_visit() in the database)
+    // A corrected bill: it replaces a bill the owner just cancelled (same as create_bill() in the database)
+    const old = p.replaces ? T('bills').find((x) => x.id === p.replaces && x.status === 'cancelled' && !x.replaced_by) : null;
+    if (old) { old.replaced_by = bill.id; bill.replaces = old.id; }
     return bill;
+  }
+
+  // Edit a saved bill: the owner only; what doesn't change the money, with a history (same rules as edit_bill() in
+  // the database)
+  function editBill(id, p) {
+    if (!ownerHere()) throw new Error('Only the owner can edit a bill');
+    const b = T('bills').find((x) => x.id === id);
+    if (!b) throw new Error('Bill not found');
+    if (b.status !== 'paid') throw new Error("A cancelled bill can't be edited");
+    const reason = String(p.reason || '').trim().slice(0, 200);
+    if (!reason) throw new Error('Write why the bill is being changed');
+    const ch = {};
+    const staffNo = (ph) => T('staff').some((s) => s.active && String(s.phone || '').replace(/\D/g, '').slice(-10) === ph);
+    if ('customer_phone' in p) {
+      const ph = String(p.customer_phone || '').replace(/\D/g, '') || null;
+      if (ph !== (b.customer_phone || null)) {
+        if (ph && !/^[6-9]\d{9}$/.test(ph)) throw new Error('The mobile number must be 10 digits');
+        if (b.for_staff) throw new Error("This is a staff member's own bill (staff prices). Use Correct items instead.");
+        if (ph && staffNo(ph)) throw new Error("That is a staff member's number: their own bills have staff prices. Use Correct items instead.");
+        if (Number(b.paid_points) > 0) throw new Error("Points were used on this bill, so its number can't change. Use Correct items instead.");
+        const earned = Number(b.points_earned) || 0;
+        if (earned > 0 && !ph) throw new Error('This bill earned points, so it needs a mobile number');
+        const oldC = b.customer_id ? T('customers').find((c) => c.id === b.customer_id) : null;
+        if (earned > 0 && oldC && Number(oldC.points) < earned) throw new Error('The points this bill earned were already used by that customer. Use Correct items instead.');
+        let nc = ph ? T('customers').find((c) => c.phone === ph) : null;
+        if (ph && !nc) nc = insertRow('customers', { phone: ph, name: String(p.customer_name || '').trim() || null });
+        if (earned > 0) {
+          addPoints({ customer_id: oldC.id, bill_id: b.id, kind: 'adjust', points: -earned, note: `Bill ${b.bill_no} moved to ${ph}` });
+          addPoints({ customer_id: nc.id, bill_id: b.id, kind: 'adjust', points: earned, note: `Bill ${b.bill_no} moved from ${b.customer_phone || 'no number'}` });
+        }
+        ch.customer_phone = [b.customer_phone || null, ph];
+        Object.assign(b, { customer_id: nc ? nc.id : null, customer_phone: ph, points_balance: null });
+        if (oldC) refreshCustomer(oldC.id);
+        if (nc) refreshCustomer(nc.id);
+      }
+    }
+    if ('customer_name' in p) {
+      const nm = String(p.customer_name || '').trim().slice(0, 80) || null;
+      if (nm !== (b.customer_name || null)) {
+        ch.customer_name = [b.customer_name || null, nm];
+        b.customer_name = nm;
+        const c = b.customer_id && T('customers').find((x) => x.id === b.customer_id);
+        if (c && nm) c.name = nm;
+      }
+    }
+    if (Array.isArray(p.items)) {
+      const month = istDay(b.created_at).slice(0, 7);
+      const moves = [];
+      for (const it of p.items) {
+        const li = T('bill_items').find((x) => x.id === it.id && x.bill_id === b.id);
+        if (!li) throw new Error('That line is not on this bill');
+        const st = it.staff_id ? T('staff').find((s) => s.id === it.staff_id) : null;
+        if (it.staff_id && !st) throw new Error('Choose a staff member on the list');
+        if ((st ? st.id : null) === (li.staff_id || null)) continue;
+        if (T('payslips').some((x) => x.month === month && x.status === 'paid' && [li.staff_id, st && st.id].includes(x.staff_id))) {
+          const mn = new Date(b.created_at).toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', month: 'long', year: 'numeric' });
+          throw new Error(`The salary for ${mn} is already paid, so who did ${li.name} can't change now`);
+        }
+        moves.push({ li, st });
+      }
+      if (moves.length) {
+        ch.staff = moves.map(({ li, st }) => ({ line: li.name, from: li.staff_name || null, to: st ? st.name : null }));
+        for (const { li, st } of moves) Object.assign(li, { staff_id: st ? st.id : null, staff_name: st ? st.name : null });
+      }
+    }
+    if ('paid_cash' in p || 'paid_upi' in p || 'paid_card' in p) {
+      const amt = (k) => { const v = String(p[k] ?? '0'); if (!/^\d+(\.\d{1,2})?$/.test(v)) throw new Error('Type the amounts paid'); return Number(v); };
+      const c = amt('paid_cash'), u = amt('paid_upi'), k = amt('paid_card');
+      if (c !== Number(b.paid_cash) || u !== Number(b.paid_upi) || k !== Number(b.paid_card)) {
+        const due = Math.round((Number(b.total) - Number(b.paid_points || 0)) * 100);
+        if (Math.round((c + u + k) * 100) !== due) throw new Error(`Cash, UPI and card must add up to ₹${due / 100}`);
+        if (T('cash_closes').some((x) => x.closed_at >= b.created_at)) throw new Error("The cash for that time is already closed, so how this bill was paid can't change now");
+        const mode = (c > 0) + (u > 0) + (k > 0) > 1 ? 'Split' : u > 0 ? 'UPI' : k > 0 ? 'Card' : 'Cash';
+        ch.payment = [{ mode: b.pay_mode, cash: b.paid_cash, upi: b.paid_upi, card: b.paid_card }, { mode, cash: c, upi: u, card: k }];
+        Object.assign(b, { paid_cash: c, paid_upi: u, paid_card: k, pay_mode: mode });
+      }
+    }
+    if ('note' in p) {
+      const nt = String(p.note || '').trim().slice(0, 300) || null;
+      if (nt !== (b.note || null)) { ch.note = [b.note || null, nt]; b.note = nt; }
+    }
+    if (!Object.keys(ch).length) throw new Error('Nothing was changed');
+    b.edited_at = new Date().toISOString();
+    insertRow('bill_edits', { bill_id: b.id, edited_by: 'demo owner', reason, changes: ch, edited_at: b.edited_at });
+    return b;
   }
 
   function cancelBill({ p_id, p_reason }) {
@@ -848,6 +936,7 @@ export function createLocalDb() {
       else if (name === 'cash_now') out = cashNow({ bills: T('bills'), expenses: T('expenses'), closes: T('cash_closes') });
       else if (name === 'close_day') out = closeDay(args.p);
       else if (name === 'handle_feedback') out = handleFeedback(args);
+      else if (name === 'edit_bill') out = editBill(args.p_id, args.p || {});
       else throw new Error('Unknown function ' + name);
       persist(state);
       return clone(out);

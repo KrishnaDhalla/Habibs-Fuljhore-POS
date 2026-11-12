@@ -135,6 +135,8 @@ export default function Billing({ hasBanner }) {
   const [lineEdit, setLineEdit] = useState(null);
   // A past bill (owner only): { date, time, paper } while the owner types in a bill from before
   const [past, setPast] = useState(draft.past || null);
+  // Correcting a bill (owner, "Correct items" on a bill): { id, bill_no, total } of the cancelled bill this replaces
+  const [replaces, setReplaces] = useState(draft.replaces || null);
   const [picker, setPicker] = useState(null); // {service, mode:'variant'|'price'}
   const [openPrice, setOpenPrice] = useState('');
   const [saving, setSaving] = useState(false);
@@ -174,9 +176,9 @@ export default function Billing({ hasBanner }) {
   // Keep the bill if the page is refreshed
   useEffect(() => {
     try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ section, phone, skip, newCust, curStaff, lines, discType, discVal, payMode, billId: billId.current, past }));
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ section, phone, skip, newCust, curStaff, lines, discType, discVal, payMode, billId: billId.current, past, replaces }));
     } catch { /* ignore */ }
-  }, [section, phone, skip, newCust, curStaff, lines, discType, discVal, payMode, past]);
+  }, [section, phone, skip, newCust, curStaff, lines, discType, discVal, payMode, past, replaces]);
 
   // Only one staff member? Pick them automatically.
   useEffect(() => {
@@ -430,7 +432,7 @@ export default function Billing({ hasBanner }) {
     setPhone(''); setSkip(false); setCust(null); setLookup('idle'); setNewCust(EMPTY_NEW); setEditName('');
     setLines([]); setDiscVal(''); setDiscType('pct'); setPayMode(''); setCashGiven(''); setSplit({ cash: '', upi: '', card: '' });
     setNote(''); setTried(false); setShowBill(false); setLastVisit(null); setOffersOn(true); setPtsOn(false); setPtsVal('');
-    setLineEdit(null); setPast(null); setWaSend(true);
+    setLineEdit(null); setPast(null); setWaSend(true); setReplaces(null);
   };
   // Start a past bill: the owner only, here at the counter
   const startPast = async () => {
@@ -501,6 +503,7 @@ export default function Billing({ hasBanner }) {
         round_off: bill.round_off, total: bill.total, pay_mode: payMode, ...pay, note: note.trim(),
         created_by: user && user.email ? user.email : '',
         owner_grant_id: grantId,
+        ...(replaces && !past ? { replaces: replaces.id, note: [note.trim(), `Replaces ${replaces.bill_no}`].filter(Boolean).join(' · ') } : {}),
         ...(past ? { past: true, created_at: new Date(pastAt).toISOString(), paper_no: (past.paper || '').trim() } : {}),
         // WhatsApp bills: a bill saved offline goes on WhatsApp when it uploads
         ...(waBillsOn(settings) && waSend && custPhone && !past ? { wa_send: true } : {}),
@@ -594,6 +597,20 @@ export default function Billing({ hasBanner }) {
               )}
             </span>
           </div>
+
+          {/* ---- Correcting a bill (owner only) ---- */}
+          {replaces && !past && (
+            <div className="sub-card stack tight" id="correcting-card">
+              <div className="row between">
+                <b>Correcting {replaces.bill_no}</b>
+                <button className="link small" onClick={() => setReplaces(null)}>Not a correction</button>
+              </div>
+              <p className="small muted" style={{ margin: 0 }}>
+                {replaces.bill_no} ({rupee(replaces.total)}) is cancelled. Fix the items below and save: this bill gets a new number and says it replaces {replaces.bill_no}.
+                Offers and points work out again as for any new bill.
+              </p>
+            </div>
+          )}
 
           {/* ---- A past bill (owner only) ---- */}
           {past && (

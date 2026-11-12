@@ -8,7 +8,7 @@ import { payText } from '../components/Receipt';
 import { WA_SHORT } from '../lib/whatsapp';
 import { Expenses, CashClose } from './Cash';
 
-export default function Bills() {
+export default function Bills({ onOpenBill }) {
   const [tab, setTab] = useState('bills');
   return (
     <div className="page">
@@ -18,14 +18,14 @@ export default function Bills() {
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
-      {tab === 'bills' && <BillsList />}
+      {tab === 'bills' && <BillsList onOpenBill={onOpenBill} />}
       {tab === 'exp' && <Expenses />}
       {tab === 'close' && <CashClose />}
     </div>
   );
 }
 
-function BillsList() {
+function BillsList({ onOpenBill }) {
   const { toast } = useApp();
   const [day, setDay] = useState(istDay());
   const [bills, setBills] = useState(null);
@@ -126,7 +126,8 @@ function BillsList() {
           bill={open}
           items={itemsByBill[open.id]}
           onClose={() => setOpen(null)}
-          onChanged={() => { setOpen(null); load(); }}
+          onChanged={(b, o) => { if (!(o && o.keepOpen)) setOpen(null); load(); }}
+          onCorrect={() => { setOpen(null); if (onOpenBill) onOpenBill(); }}
         />
       )}
     </>
