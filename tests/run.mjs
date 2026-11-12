@@ -16,7 +16,7 @@ import { build } from 'esbuild';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 
-const suites = ['maths', 'payroll', 'stock', 'db', 'menu', 'staff', 'loyalty', 'telegram', 'whatsapp', 'wa-api'].filter((s) => !process.env.ONLY || process.env.ONLY.split(',').includes(s));
+const suites = ['maths', 'payroll', 'stock', 'db', 'menu', 'staff', 'loyalty', 'telegram', 'whatsapp', 'wa-api', 'wa-bot'].filter((s) => !process.env.ONLY || process.env.ONLY.split(',').includes(s));
 mkdirSync('tests/.out', { recursive: true });
 let failed = 0;
 for (const s of suites) {

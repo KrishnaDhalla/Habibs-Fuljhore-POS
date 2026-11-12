@@ -97,8 +97,8 @@ With this on, every bill goes to the customer's WhatsApp by itself after saving:
 4. **The bill template.** WhatsApp Manager → **Message templates → Create template**: category **Utility**, name `bill_receipt`, language **English**.
    - Header: **Image** (upload any bill picture as the sample)
    - Body (exactly, with the 4 variables):
-     `Hi {{1}}, thank you for visiting Habibs Hair & Beauty Fuljhore. Your bill {{2}} for ₹{{3}} is in the picture above. {{4}} Reply here if anything on the bill is not right.`
-   - Samples: {{1}} `Ananya`, {{2}} `HF2627-0042`, {{3}} `3,300`, {{4}} `You earned 120 loyalty points, balance 270 = ₹270 off your next visit.`
+     `Hi {{1}}, here is your bill {{2}} from Habibs Hair & Beauty Fuljhore for ₹{{3}}. The bill is in the picture above. {{4}} Reply to this message if anything on the bill is not right.`
+   - Samples: {{1}} `Ananya`, {{2}} `HF2627-0042`, {{3}} `3,300`, {{4}} `Loyalty points: 120 added, balance 270.`
    - Footer: `Habibs Hair & Beauty · Fuljhore, Durgapur`
    Submit. It is usually approved within minutes to a few hours. If Meta marks it **Marketing**, it costs more: keep the wording as above (a bill is a utility message).
 5. **A token that doesn't expire.** business.facebook.com → **Settings → Users → System users → Add** (admin). **Assign assets**: the app and the WhatsApp account, full control. **Generate token**: the app, permissions `whatsapp_business_messaging` and `whatsapp_business_management`, expiry **Never**. Copy it.
@@ -110,6 +110,8 @@ With this on, every bill goes to the customer's WhatsApp by itself after saving:
    - only if the template's language shows as *English (US)*: `WHATSAPP_TEMPLATE_LANG` = `en_US`
 7. **Delivery ticks and replies (the webhook).** In the Meta app: WhatsApp → **Configuration → Webhook → Edit**: Callback URL `https://<PROJECT-REF>.supabase.co/functions/v1/whatsapp`, Verify token = your `WHATSAPP_VERIFY_TOKEN`, **Verify and save**. Then under Webhook fields, **Subscribe** to `messages`. Switch the app to **Live** (App settings: it asks for a privacy policy link, e.g. a page on your website).
 8. **Switch it on.** In the app: **Settings → Salon & bill → WhatsApp bills → On**, Save, and tap **Check the WhatsApp setup**: it shows the number, its name and quality. Make a bill to your own number to try it.
+
+**The booking bot (optional).** **Settings → Salon & bill → Booking bot → On** (after steps 1–7 and running `supabase/01_schema.sql` again). A customer who messages the salon's number gets three buttons: **Book appointment** (service, size, day, time, name, all by tapping), **Prices & offers**, **Talk to us**. A booking arrives in **Appointments → Requests** marked WhatsApp, and the owners get a Telegram message. Confirm it as usual (pick the time): the confirmation goes to the customer from the salon's number by itself. Prices and Talk to us are kept under **Appointments → Enquiries**; after Talk to us the bot stays quiet for 12 hours and their messages come to the owners on Telegram (call them back, or WhatsApp them from your own phone). They type **MENU** to get the buttons again. Free: the customer wrote first, so WhatsApp's 24-hour reply window covers it. No extra template needed.
 
 **At the counter** there is one tick on the bill, **Send the bill on WhatsApp to …**, on by itself. Ask the customer ("Shall we WhatsApp you the bill?") and untick it if they don't want it: Meta expects customers to agree to messages. A bill saved without internet goes when it uploads. From **Bills**, a bill can be sent by hand (**Send on WhatsApp**, or **Send again**: at most 3 times a bill). Bills older than 30 days aren't sent.
 

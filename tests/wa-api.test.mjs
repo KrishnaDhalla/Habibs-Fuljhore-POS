@@ -156,7 +156,7 @@ const mc = graphCalls.find((c) => c.path.endsWith('/messages'));
 const m = mc && JSON.parse(mc.init.body);
 ok('2. the template message: to 91 + the number, bill_receipt, English', m && m.to === '919831100021' && m.type === 'template' && m.template.name === 'bill_receipt' && m.template.language.code === 'en', JSON.stringify(m));
 ok('…the picture on top (the uploaded one)', m && m.template.components[0].type === 'header' && m.template.components[0].parameters[0].image.id === 'media-1');
-ok('…4 values: first name, bill number, total, points (earned and the balance)', m && JSON.stringify(m.template.components[1].parameters.map((p) => p.text)) === JSON.stringify(['Ananya', 'HF2627-0042', '3,300', 'You earned 120 loyalty points, balance 270 = ₹270 off your next visit.']), JSON.stringify(m && m.template.components[1]));
+ok('…4 values: first name, bill number, total, points (earned and the balance)', m && JSON.stringify(m.template.components[1].parameters.map((p) => p.text)) === JSON.stringify(['Ananya', 'HF2627-0042', '3,300', 'Loyalty points: 120 added, balance 270.']), JSON.stringify(m && m.template.components[1]));
 ok('recorded: sending, then sent with WhatsApp\'s id, by whom', wa.length === 1 && wa[0].status === 'sent' && wa[0].wamid === 'wamid.1' && wa[0].phone === '9831100021' && wa[0].created_by === 'counter@habibs' && wa[0].bill_id === id(1), JSON.stringify(wa));
 // once by itself
 graphCalls.length = 0;
@@ -171,9 +171,9 @@ wa.forEach((r) => { r.created_at = new Date(now - 120000).toISOString(); });
 const fourth = await send(id(1), { again: true });
 ok('at most 3 sends a bill', fourth[1].ok === false && /3 times/.test(fourth[1].error) && wa.length === 3, JSON.stringify(fourth));
 // the values for other bills
-ok('values: no name → "there"; ₹1,234.5; no points → "Thank you for choosing us."', JSON.stringify(billValues(bills[4])) === JSON.stringify(['there', 'HF2627-0045', '1,234.5', 'Thank you for choosing us.']), JSON.stringify(billValues(bills[4])));
-ok('values: a staff member\'s own bill says nothing about points', billValues(bills[5])[3] === 'Thank you for choosing us.');
-ok('values: paid with points, no new points', billValues({ ...bills[0], points_earned: 0 })[3] === 'You paid ₹100 with loyalty points, balance 270.');
+ok('values: no name → "there"; ₹1,234.5; no points → "Please keep it for your records."', JSON.stringify(billValues(bills[4])) === JSON.stringify(['there', 'HF2627-0045', '1,234.5', 'Please keep it for your records.']), JSON.stringify(billValues(bills[4])));
+ok('values: a staff member\'s own bill says nothing about points', billValues(bills[5])[3] === 'Please keep it for your records.');
+ok('values: paid with points, no new points', billValues({ ...bills[0], points_earned: 0 })[3] === 'Loyalty points: 100 used on this bill, balance 270.');
 ok('values: never a new line, a tab or 4 spaces (WhatsApp refuses them)', !/[\n\t]| {4}/.test(billValues({ ...bills[0], customer_name: 'A\tB', bill_no: 'X\nY' }).join('|')));
 // Meta's errors
 tg.length = 0;
@@ -238,7 +238,7 @@ const reply = { object: 'whatsapp_business_account', entry: [{ changes: [{ field
   messages: [{ from: '919831100021', id: 'wamid.in1', type: 'text', text: { body: 'The facial was ₹2,500, not ₹2,800?' } }, { from: '919831100021', id: 'wamid.in2', type: 'image', image: { id: 'x' } }] } }] }] };
 const [rs, rr] = await hook(reply);
 ok('a customer\'s reply goes to both owners on Telegram, with the name, number and a link to reply', rs === 200 && rr.forwarded === 4 && tg.length === 4
-  && tg[0].text === 'WhatsApp message from Ananya (98311 00021):\nThe facial was ₹2,500, not ₹2,800?\n\nReply in the WhatsApp Business app: https://wa.me/919831100021'
+  && tg[0].text === 'WhatsApp message from Ananya (98311 00021):\nThe facial was ₹2,500, not ₹2,800?\n\nCall them, or WhatsApp them from your phone: https://wa.me/919831100021'
   && /\[a photo\]/.test(tg[2].text) && JSON.stringify(tg.map((t) => t.chat_id)) === JSON.stringify(['111', '222', '111', '222']), JSON.stringify(tg));
 ok('the app\'s own call with no action → refused', (await call(A, {}))[0] === 400);
 ok('anything but GET and POST → refused', (await handler(new Request('https://fn/whatsapp', { method: 'PUT' }))).status === 405);

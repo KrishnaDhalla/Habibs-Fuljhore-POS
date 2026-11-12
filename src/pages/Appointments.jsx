@@ -184,7 +184,15 @@ export default function Appointments({ onOpenBill, onCounts }) {
             setEdit(null);
             if (b.want_date !== day && tab === 'day') setDay(b.want_date);
             load();
-            if (b.status === 'confirmed' && !b.confirm_sent_at) setAfter({ booking: b, kind: 'confirm', isNew: wasNew });
+            if (b.status !== 'confirmed' || b.confirm_sent_at) return;
+            // booked through the WhatsApp bot: the confirmation goes from the salon's number by itself
+            if (b.created_by === 'whatsapp') {
+              db.whatsapp({ action: 'booking_confirm', id: b.id })
+                .then((r) => { if (r && r.ok) { toast(`Confirmation sent to ${firstName(b.name)} on WhatsApp`, 'ok'); load(); } else setAfter({ booking: b, kind: 'confirm', isNew: wasNew }); })
+                .catch(() => setAfter({ booking: b, kind: 'confirm', isNew: wasNew }));
+              return;
+            }
+            setAfter({ booking: b, kind: 'confirm', isNew: wasNew });
           }} />
       )}
       {enq && <EnquiryModal enquiry={enq} onClose={() => setEnq(null)} onSaved={() => { setEnq(null); setTab('enq'); load(); }} />}
