@@ -41,7 +41,7 @@ const DEFAULTS = {
   service_usage: { amount: 0, amounts: null, weight: 1 },
   free_uses: { qty: 1, option_label: null, extra_label: null, note: null },
   bookings: { status: 'requested', source: 'whatsapp', slot_at: null, staff_id: null, note: null, bill_id: null, confirmed_at: null, reminded_at: null, confirm_sent_at: null, cancel_reason: null, enquiry_id: null },
-  enquiries: { status: 'new', source: 'whatsapp', service_ids: null, follow_up_on: null, close_reason: null, booking_id: null, message: null },
+  enquiries: { status: 'new', source: 'whatsapp', service_ids: null, follow_up_on: null, close_reason: null, booking_id: null, message: null, call_time: null, calls: 0, last_call_at: null, last_call_note: null },
   bills: { status: 'paid', discount: 0, cgst: 0, sgst: 0, round_off: 0, paid_cash: 0, paid_upi: 0, paid_card: 0, paid_points: 0, points_earned: 0, points_balance: null, paid_due: 0, change_upi: 0, due_cleared: 0, due_left: 0 },
   loyalty_points: { bill_id: null, note: null, created_by: null },
   payslips: { status: 'paid' },
@@ -1345,6 +1345,7 @@ export function createLocalDb() {
     book({ phone: '9831100014', name: 'Ritika Jain', source: 'instagram', date: addDays(today, 2), time: 'Morning', items: [{ service_id: sv("Women's L'Oreal Classic Hair Spa").id }] });
     insertRow('enquiries', { phone: '9831100021', name: 'Ananya Paul', source: 'whatsapp', message: 'Nanoplastia price for waist-length hair?', service_ids: [sv('Nanoplastia').id], created_by: 'demo', created_at: new Date(Date.now() - 2 * 3600000).toISOString() });
     insertRow('enquiries', { phone: '9831100022', name: 'Shreya Das', source: 'website', message: 'Do you do a bridal makeup trial? Wedding in February.', service_ids: null, created_by: 'website', created_at: new Date(Date.now() - 5 * 3600000).toISOString() });
+    insertRow('enquiries', { phone: '9831100024', name: 'Moumita Ghosh', source: 'phone', message: 'Called: hair spa price, wants to come on a weekday', call_time: 'Evening', status: 'follow_up', follow_up_on: today, created_by: 'demo', created_at: new Date(Date.now() - 86400000).toISOString() });
     insertRow('enquiries', { phone: '9831100023', name: 'Tanmoy Sen', source: 'instagram', message: 'Asked about keratin, deciding after Diwali', service_ids: [sv('Keratin').id], status: 'follow_up', follow_up_on: today, created_by: 'demo', created_at: new Date(Date.now() - 6 * 86400000).toISOString() });
     // Expenses, yesterday's cash close, feedback and automatic messages (Bills → Expenses, Cash close; Customers → Feedback)
     const yAt = (t) => `${addDays(today, -1)}T${t}:00+05:30`;

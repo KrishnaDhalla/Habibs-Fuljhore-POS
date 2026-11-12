@@ -4066,3 +4066,9 @@ drop function if exists wa_book(jsonb);
 drop function if exists wa_enquiry(jsonb);
 drop table if exists wa_chats;
 delete from settings where key = 'wa_bot_on';
+
+-- Call back (November 2026): someone called and asked; the counter calls them back (Bookings → Call back)
+alter table enquiries add column if not exists call_time      text;                    -- best time to call: Morning, Evening, "after 5"
+alter table enquiries add column if not exists calls          int not null default 0;  -- times the salon called them
+alter table enquiries add column if not exists last_call_at   timestamptz;
+alter table enquiries add column if not exists last_call_note text;                    -- what happened: No answer, "after her exams"

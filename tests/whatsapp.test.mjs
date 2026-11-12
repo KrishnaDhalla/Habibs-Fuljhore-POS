@@ -120,5 +120,43 @@ check('stock message: fits in one WhatsApp message (under 4,000 characters) even
   return m.length <= 4000 && /and \d+ more/.test(m);
 })());
 
+// ---------- Call back (phone enquiries) and the website popup ----------
+{
+  const { callList, callOutcome } = await import('../src/lib/bookings.js');
+  const { newWebsiteItems } = await import('../src/lib/alerts.js');
+  const T = '2026-11-13';
+  const E = (id, o) => ({ id, status: 'new', source: 'phone', created_at: `2026-11-1${id.length}T10:00:00Z`, ...o });
+  const enqs = [
+    E('a', {}),                                                          // a phone enquiry, not called yet: today
+    E('bb', { status: 'follow_up', follow_up_on: '2026-11-11' }),        // overdue
+    E('ccc', { status: 'follow_up', follow_up_on: '2026-11-15' }),       // later
+    E('d', { source: 'whatsapp' }),                                      // a WhatsApp question with no day: not a call
+    E('e', { source: 'instagram', status: 'replied', follow_up_on: T }), // any source with a day to call: on the list
+    E('f', { status: 'closed', follow_up_on: T }), E('g', { status: 'booked' }),
+  ];
+  const cl = callList(enqs, T);
+  check('call back: today = overdue first, then today; later apart; closed, booked and day-less WhatsApp left out',
+    cl.due.map((e) => e.id).join() === 'bb,a,e' && cl.later.map((e) => e.id).join() === 'ccc', JSON.stringify(cl));
+  const now = new Date('2026-11-13T09:00:00Z');
+  const na = callOutcome({ calls: 1 }, 'no_answer', { today: T, now });
+  check('no answer: counted, call again tomorrow', na.calls === 2 && na.follow_up_on === '2026-11-14' && na.status === 'follow_up' && na.last_call_note === 'No answer' && na.last_call_at === now.toISOString());
+  const ag = callOutcome({}, 'again', { today: T, days: 7, note: ' After her exams ' });
+  check('call again in a week, with what they said', ag.calls === 1 && ag.follow_up_on === '2026-11-20' && ag.last_call_note === 'After her exams');
+  check('month end: 3 days from 30 Nov is 3 Dec', callOutcome({}, 'again', { today: '2026-11-30', days: 3 }).follow_up_on === '2026-12-03');
+  const cz = callOutcome({ calls: 2 }, 'closed', { reason: 'Price' });
+  check('not interested: closed with the reason', cz.status === 'closed' && cz.close_reason === 'Price' && cz.calls === 3);
+  check('booked: only counted (the booking marks the enquiry booked)', !('status' in callOutcome({}, 'booked')) && callOutcome({}, 'booked').calls === 1);
+  // the popup
+  const rows = {
+    bookings: [{ id: 'b1', source: 'website', status: 'requested', created_at: '2026-11-13T05:00:00Z' }, { id: 'b2', source: 'phone', status: 'requested', created_at: '2026-11-13T05:01:00Z' },
+      { id: 'b3', source: 'website', status: 'confirmed', created_at: '2026-11-13T04:00:00Z' }],
+    enquiries: [{ id: 'q1', source: 'website', status: 'new', created_at: '2026-11-13T04:30:00Z' }, { id: 'q2', source: 'website', status: 'replied', created_at: '2026-11-13T04:40:00Z' }],
+  };
+  check('popup: first time on a device, nothing pops (what is there counts as seen)', newWebsiteItems(rows, null).length === 0);
+  check('popup: website requests and new questions not seen, oldest first; counter bookings and handled ones left out',
+    newWebsiteItems(rows, []).map((x) => x.id).join() === 'q1,b1');
+  check('popup: once seen, not again', newWebsiteItems(rows, ['q1', 'b1']).length === 0 && newWebsiteItems(rows, ['q1']).map((x) => x.kind).join() === 'booking');
+}
+
 console.log(`${checks.toLocaleString('en-IN')} WhatsApp checks, ${fails} failed`);
 process.exit(fails ? 1 : 0);

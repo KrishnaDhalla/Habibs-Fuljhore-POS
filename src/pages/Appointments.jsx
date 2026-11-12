@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Phone, MessageCircle, Pencil, ReceiptText, X, CalendarClock, MessageSquarePlus, Check, AlertTriangle, ClipboardPaste } from 'lucide-react';
+import { Plus, Phone, PhoneCall, MessageCircle, Pencil, ReceiptText, X, CalendarClock, MessageSquarePlus, Check, AlertTriangle, ClipboardPaste } from 'lucide-react';
 import { db } from '../lib/db';
 import { useApp } from '../store';
 import { rupee, istDay, addDays, uid, fmtDateTime } from '../lib/format';
 import { Modal, Field, Seg, Empty, Loading, SearchBox, DateNav, Stat } from '../components/ui';
 import {
   SOURCES, SOURCE_LABEL, STATUS_LABEL, ENQ_STATUS, CLOSE_REASONS, cleanPhone, bookingItem, durationOf, clashes,
-  slotTime, slotDay, slotIso, timeOf, waLink, bookingMessage, enquiryMessage, billDraft,
+  slotTime, slotDay, slotIso, timeOf, waLink, bookingMessage, enquiryMessage, billDraft, CALL_TIMES, callList, callOutcome,
 } from '../lib/bookings';
 
 const DRAFT_KEY = 'habibs-pos-draft';
@@ -28,10 +28,10 @@ export async function appointmentCounts() {
   return req.length + enq.filter((e) => e.status === 'new' || (e.follow_up_on && e.follow_up_on <= today)).length;
 }
 
-export default function Appointments({ onOpenBill, onCounts }) {
+export default function Appointments({ onOpenBill, onCounts, startTab }) {
   const { staff, services, settings, toast } = useApp();
   const today = istDay();
-  const [tab, setTab] = useState('day');
+  const [tab, setTab] = useState(startTab || 'day');
   const [day, setDay] = useState(today);
   const [who, setWho] = useState('');
   const [data, setData] = useState(null);
@@ -86,6 +86,7 @@ export default function Appointments({ onOpenBill, onCounts }) {
   const openEnq = data ? data.enqs.filter((e) => ['new', 'replied', 'follow_up'].includes(e.status)) : [];
   const doneEnq = data ? data.enqs.filter((e) => !['new', 'replied', 'follow_up'].includes(e.status)) : [];
   const dueEnq = openEnq.filter((e) => e.status === 'new' || (e.follow_up_on && e.follow_up_on <= today));
+  const calls = useMemo(() => callList(data ? data.enqs : [], today), [data, today]);
   const stats = useMemo(() => {
     if (!data) return null;
     const live = data.day.filter((b) => b.status !== 'cancelled');
@@ -99,6 +100,7 @@ export default function Appointments({ onOpenBill, onCounts }) {
       <div className="page-head row between wrap">
         <h1>Bookings</h1>
         <div className="row wrap">
+          <button className="btn line sm" id="call-enquiry" onClick={() => setEnq({ source: 'phone', follow_up_on: today })}><PhoneCall size={15} /> Call enquiry</button>
           <button className="btn line sm" onClick={() => setEnq({})}><MessageSquarePlus size={15} /> New enquiry</button>
           <button className="btn primary sm" onClick={() => setEdit({ want_date: tab === 'day' ? day : today })}><Plus size={15} /> New booking</button>
         </div>
@@ -107,6 +109,7 @@ export default function Appointments({ onOpenBill, onCounts }) {
         <button className={tab === 'day' ? 'on' : ''} onClick={() => setTab('day')}>Day</button>
         <button className={tab === 'req' ? 'on' : ''} onClick={() => setTab('req')}>Requests{data && data.req.length ? <span className="count">{data.req.length}</span> : null}</button>
         <button className={tab === 'enq' ? 'on' : ''} onClick={() => setTab('enq')}>Enquiries{dueEnq.length ? <span className="count">{dueEnq.length}</span> : null}</button>
+        <button className={tab === 'call' ? 'on' : ''} id="tab-call" onClick={() => setTab('call')}>Call back{calls.due.length ? <span className="count">{calls.due.length}</span> : null}</button>
       </div>
       {!data ? <Loading /> : tab === 'day' ? (
         <div className="stack loose">
@@ -160,6 +163,26 @@ export default function Appointments({ onOpenBill, onCounts }) {
             </div>
           )}
         </div>
+      ) : tab === 'call' ? (
+        <div className="stack loose" id="call-back">
+          <p className="small muted">People to phone: someone who called and asked (<b>Call enquiry</b>), and any enquiry with a day to follow up. Tap <b>Call</b>, then say how it went: it comes back on the right day by itself.</p>
+          <div className="eyebrow">To call today{calls.due.length ? ` (${calls.due.length})` : ''}</div>
+          {calls.due.length === 0 ? <div className="card"><Empty title="Nobody to call today">Add one with <b>Call enquiry</b> when someone phones and asks.</Empty></div> : (
+            <div className="appt-list">
+              {calls.due.map((e) => <CallCard key={e.id} e={e} onChanged={load} onEdit={() => setEnq(e)}
+                onBook={() => setEdit({ enquiry: e, phone: e.phone, name: e.name, source: e.source, want_date: today, items: (e.service_ids || []).map((id) => ({ service_id: id })) })} />)}
+            </div>
+          )}
+          {calls.later.length > 0 && (
+            <>
+              <div className="eyebrow">Later</div>
+              <div className="appt-list">
+                {calls.later.map((e) => <CallCard key={e.id} e={e} later onChanged={load} onEdit={() => setEnq(e)}
+                  onBook={() => setEdit({ enquiry: e, phone: e.phone, name: e.name, source: e.source, want_date: today, items: (e.service_ids || []).map((id) => ({ service_id: id })) })} />)}
+              </div>
+            </>
+          )}
+        </div>
       ) : (
         <div className="stack loose">
           <p className="small muted">Questions from WhatsApp, calls, Instagram and the website. Reply, book, or set a day to follow up. Someone who comes in and is billed within 30 days is marked <b>Came</b> by itself.</p>
@@ -187,7 +210,7 @@ export default function Appointments({ onOpenBill, onCounts }) {
             if (b.status === 'confirmed' && !b.confirm_sent_at) setAfter({ booking: b, kind: 'confirm', isNew: wasNew });
           }} />
       )}
-      {enq && <EnquiryModal enquiry={enq} onClose={() => setEnq(null)} onSaved={() => { setEnq(null); setTab('enq'); load(); }} />}
+      {enq && <EnquiryModal enquiry={enq} onClose={() => setEnq(null)} onSaved={(r) => { setEnq(null); setTab(r && (r.source === 'phone' || r.follow) ? 'call' : 'enq'); load(); }} />}
       {bill && <StartBillModal booking={bill.booking} items={bill.items} onClose={() => setBill(null)} onOpen={() => { setBill(null); onOpenBill(); }} />}
       {cancel && <CancelModal booking={cancel} onClose={() => setCancel(null)} onDone={(reason) => { const b = cancel; setCancel(null); setStatus(b, 'cancelled', { cancel_reason: reason }); }} />}
       {after && (
@@ -525,6 +548,61 @@ function EnquiryCard({ e, due, done, onEdit, onBook, onChanged }) {
   );
 }
 
+// One person to phone back: what they asked, when to call, how the last calls went; after a call, say how it went
+function CallCard({ e, later, onEdit, onBook, onChanged }) {
+  const { services, toast } = useApp();
+  const [open, setOpen] = useState(false);   // the "how did it go?" buttons (after tapping Call)
+  const [more, setMore] = useState('');      // 'again' | 'close'
+  const [note, setNote] = useState('');
+  const today = istDay();
+  const asked = services.filter((s) => (e.service_ids || []).includes(s.id));
+  const done = async (kind, o = {}) => {
+    try {
+      await db.update('enquiries', e.id, callOutcome(e, kind, { today, note, ...o }));
+      toast(kind === 'no_answer' ? 'No answer: on the list again tomorrow' : kind === 'again' ? 'Call again set' : kind === 'closed' ? 'Closed' : 'Saved', 'ok');
+      setOpen(false); setMore(''); setNote('');
+      if (kind === 'booked') onBook(); else onChanged();
+    } catch (x) { toast(x.message, 'bad'); }
+  };
+  const when = e.follow_up_on ? (e.follow_up_on < today ? `was due ${slotDay(e.follow_up_on)}` : e.follow_up_on === today ? 'today' : slotDay(e.follow_up_on)) : 'today';
+  return (
+    <div className={'appt card' + (later ? ' faded' : '')} data-call={e.phone}>
+      <div className="appt-time"><b>{when}</b><span className="tiny muted">{e.call_time || SOURCE_LABEL[e.source] || ''}</span></div>
+      <div className="appt-main">
+        <div className="row wrap" style={{ gap: 8 }}>
+          <span className="strong">{e.name || 'No name'}</span>
+          <a className="strong" href={'tel:+91' + e.phone}>{fmtPhone(e.phone)}</a>
+          {e.follow_up_on && e.follow_up_on < today && <span className="pill bad">Overdue</span>}
+        </div>
+        {e.message && <div className="small">"{e.message}"</div>}
+        {asked.length > 0 && <div className="tiny muted">About: {asked.map((s) => s.name).join(', ')}</div>}
+        <div className="tiny muted">
+          Asked {fmtDateTime(e.created_at)} ({SOURCE_LABEL[e.source] || e.source})
+          {Number(e.calls) > 0 ? ` · called ${e.calls} ${Number(e.calls) === 1 ? 'time' : 'times'}, last ${fmtDateTime(e.last_call_at)}: ${e.last_call_note || ''}` : ' · not called yet'}
+        </div>
+        {open && (
+          <div className="stack tight" style={{ marginTop: 8 }}>
+            <input className="input" value={note} onChange={(x) => setNote(x.target.value)} maxLength={300} placeholder="What they said (optional), e.g. will come after her exams" />
+            <div className="row wrap" style={{ gap: 6 }}>
+              <button className="btn primary sm" onClick={() => done('booked')}><CalendarClock size={15} /> Booked</button>
+              <button className="btn line sm" onClick={() => done('no_answer')}>No answer</button>
+              <button className={'btn line sm' + (more === 'again' ? ' on' : '')} onClick={() => setMore(more === 'again' ? '' : 'again')}>Call again…</button>
+              <button className={'btn ghost sm' + (more === 'close' ? ' on' : '')} onClick={() => setMore(more === 'close' ? '' : 'close')}>Not interested…</button>
+            </div>
+            {more === 'again' && <div className="row wrap" style={{ gap: 6 }}>{[[0, 'Later today'], [1, 'Tomorrow'], [3, 'In 3 days'], [7, 'Next week'], [30, 'Next month']].map(([d, l]) => <button key={d} className="chip sm" onClick={() => done('again', { days: d })}>{l}</button>)}</div>}
+            {more === 'close' && <div className="row wrap" style={{ gap: 6 }}>{CLOSE_REASONS.map((r) => <button key={r} className="chip sm" onClick={() => done('closed', { reason: r })}>{r}</button>)}</div>}
+          </div>
+        )}
+      </div>
+      <div className="appt-acts">
+        <a className="btn primary sm" href={'tel:+91' + e.phone} onClick={() => setOpen(true)}><PhoneCall size={15} /> Call</a>
+        <button className="btn line sm" onClick={() => setOpen((x) => !x)}>{open ? 'Hide' : 'How did it go?'}</button>
+        <button className="icon-btn plain sm" aria-label="Change" onClick={onEdit}><Pencil size={15} /></button>
+      </div>
+    </div>
+  );
+}
+
 function EnquiryModal({ enquiry, onClose, onSaved }) {
   const { services, toast } = useApp();
   const isNew = !enquiry.id;
@@ -535,6 +613,8 @@ function EnquiryModal({ enquiry, onClose, onSaved }) {
   const [ids, setIds] = useState(enquiry.service_ids || []);
   const [q, setQ] = useState('');
   const [follow, setFollow] = useState(enquiry.follow_up_on || '');
+  const [callTime, setCallTime] = useState(enquiry.call_time || '');
+  const isCall = source === 'phone';
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const p10 = cleanPhone(phone);
@@ -549,16 +629,16 @@ function EnquiryModal({ enquiry, onClose, onSaved }) {
     if (!message.trim() && !ids.length) return setErr('Write what they asked, or pick the service.');
     setBusy(true);
     const row = { phone: p10, name: name.trim() || null, source, message: message.trim() || null, service_ids: ids.length ? ids : null,
-      follow_up_on: follow || null, ...(follow && (isNew || enquiry.status === 'new') ? { status: 'follow_up' } : {}) };
+      follow_up_on: follow || null, call_time: callTime.trim() || null, ...(follow && (isNew || enquiry.status === 'new') ? { status: 'follow_up' } : {}) };
     try {
       if (isNew) await db.insert('enquiries', row);
       else await db.update('enquiries', enquiry.id, row);
-      toast('Enquiry saved', 'ok');
-      onSaved();
+      toast(follow ? `Saved: on the Call back list for ${follow === istDay() ? 'today' : slotDay(follow)}` : 'Enquiry saved', 'ok');
+      onSaved({ source, follow });
     } catch (x) { setErr(x.message); } finally { setBusy(false); }
   };
   return (
-    <Modal wide title={isNew ? 'New enquiry' : 'Enquiry: ' + (enquiry.name || fmtPhone(enquiry.phone))} onClose={onClose}
+    <Modal wide title={isNew ? (isCall ? 'Call enquiry' : 'New enquiry') : 'Enquiry: ' + (enquiry.name || fmtPhone(enquiry.phone))} onClose={onClose}
       foot={<><button className="btn line" onClick={onClose}>Back</button><button className="btn primary" disabled={busy} onClick={save}>Save</button></>}>
       <div className="form-grid">
         <Field label="Mobile number"><input className="input" id="eq-phone" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98300 12345" /></Field>
@@ -574,7 +654,19 @@ function EnquiryModal({ enquiry, onClose, onSaved }) {
             {found.length > 0 && <div className="chips">{found.map((s) => <button key={s.id} className="chip sm" onClick={() => { setIds([...ids, s.id]); setQ(''); }}>{s.name}</button>)}</div>}
           </div>
         </Field>
-        <Field label="Follow up on" hint="Optional: when to message them again"><input className="input" id="eq-follow" type="date" value={follow} onChange={(e) => setFollow(e.target.value)} /></Field>
+        <Field label={isCall ? 'Call back on' : 'Follow up on'} hint={isCall ? 'They show on Bookings → Call back that day' : 'Optional: when to message them again (shows on Call back)'}>
+          <div className="stack tight">
+            <input className="input" id="eq-follow" type="date" value={follow} onChange={(e) => setFollow(e.target.value)} />
+            <div className="chips">{[[0, 'Today'], [1, 'Tomorrow'], [3, 'In 3 days'], [7, 'Next week']].map(([d, l]) => <button key={d} className={'chip sm' + (follow === addDays(istDay(), d) ? ' on' : '')} onClick={() => setFollow(addDays(istDay(), d))}>{l}</button>)}
+              {follow && <button className="chip sm" onClick={() => setFollow('')}>No day</button>}</div>
+          </div>
+        </Field>
+        <Field label="Best time to call" hint="Optional">
+          <div className="stack tight">
+            <div className="chips">{CALL_TIMES.map((t) => <button key={t} className={'chip sm' + (callTime === t ? ' on' : '')} onClick={() => setCallTime(callTime === t ? '' : t)}>{t}</button>)}</div>
+            <input className="input" id="eq-calltime" value={callTime} maxLength={40} onChange={(e) => setCallTime(e.target.value)} placeholder="or type, e.g. after 5 pm" />
+          </div>
+        </Field>
       </div>
       {err && <p className="err-text" role="alert" style={{ marginTop: 10 }}>{err}</p>}
     </Modal>

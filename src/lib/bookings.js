@@ -8,6 +8,29 @@ export const STATUS_LABEL = { requested: 'Request', confirmed: 'Confirmed', came
 export const ENQ_STATUS = { new: 'New', replied: 'Replied', follow_up: 'Follow up', booked: 'Booked', came: 'Came', closed: 'Closed' };
 export const CLOSE_REASONS = ['Price', 'Too far', 'Just asking', 'Went elsewhere', 'No reply', 'Other'];
 
+// ---- Call back: enquiries to phone (someone called and asked; call them later) ----
+export const CALL_TIMES = ['Morning', 'Afternoon', 'Evening', 'Any time'];
+const OPEN = ['new', 'replied', 'follow_up'];
+// On the list: open enquiries with a day to call (follow_up_on), or a phone enquiry not answered yet.
+//   due: to call today (or overdue), oldest day first; later: the days after.
+export function callList(enqs, today = istDay()) {
+  const on = (enqs || []).filter((e) => OPEN.includes(e.status) && (e.follow_up_on || (e.source === 'phone' && e.status === 'new')));
+  const dayOf = (e) => e.follow_up_on || today;
+  const by = (a, b) => (dayOf(a) < dayOf(b) ? -1 : dayOf(a) > dayOf(b) ? 1 : String(a.created_at) < String(b.created_at) ? -1 : 1);
+  return { due: on.filter((e) => dayOf(e) <= today).sort(by), later: on.filter((e) => dayOf(e) > today).sort(by) };
+}
+// What a call changes on the enquiry. kind: 'no_answer' | 'again' (days: 1, 3, 7 …) | 'closed' (reason) | 'booked'
+export function callOutcome(e, kind, { today = istDay(), days = 1, reason = 'Other', note = '', now = new Date() } = {}) {
+  const base = { calls: (Number(e.calls) || 0) + 1, last_call_at: now.toISOString() };
+  const day = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const said = String(note || '').trim().slice(0, 300);
+  if (kind === 'no_answer') return { ...base, status: 'follow_up', follow_up_on: day(1), last_call_note: said || 'No answer' };
+  if (kind === 'again') return { ...base, status: 'follow_up', follow_up_on: day(Math.max(0, Number(days) || 1)), last_call_note: said || 'Call again' };
+  if (kind === 'closed') return { ...base, status: 'closed', close_reason: reason, last_call_note: said || reason };
+  if (kind === 'booked') return { ...base, last_call_note: said || 'Booked' };
+  throw new Error('Unknown call outcome');
+}
+
 export const cleanPhone = (v) => {
   const d = String(v || '').replace(/\D/g, '');
   return /^(91|0)?[6-9]\d{9}$/.test(d) ? d.slice(-10) : null;

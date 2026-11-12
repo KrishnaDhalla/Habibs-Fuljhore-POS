@@ -9,6 +9,44 @@ done in Supabase for it to work. Keep this file up to date when something change
 
 ---
 
+## 8. Call back list (phone enquiries), and a popup for website bookings
+
+**Branch:** `test` · **Date:** 13 Nov 2026
+
+### Why
+- A customer phones and asks (price, a free slot) but doesn't book: the counter needs to write it down and call
+  them back on the right day, and see how earlier calls went.
+- Website bookings and questions only reached the owners on Telegram and a number on Bookings; the counter could
+  miss them.
+
+### What it does
+**Call back** (Bookings):
+- **Call enquiry** button (top of Bookings): number, name, what they asked, services, **Call back on** (Today /
+  Tomorrow / In 3 days / Next week / a date) and **Best time to call** (Morning / Afternoon / Evening / Any time, or
+  typed). Saved as an enquiry with source Phone call.
+- **Call back** tab, with a count: **To call today** (overdue first, marked Overdue) and **Later**. On it: phone
+  enquiries not called yet, and any enquiry with a day to follow up (WhatsApp, Instagram too).
+- Each card: name, number (tap to dial), what they asked, best time, "called 2 times, last … : No answer".
+  **Call** dials and opens **How did it go?** (with an optional note): **Booked** (opens New booking from the
+  enquiry; saving marks it booked), **No answer** (back on the list tomorrow), **Call again…** (later today,
+  tomorrow, 3 days, next week, next month), **Not interested…** (closed with a reason). Every call is counted.
+**Website popup** (every device, every page, needs internet): every 30 seconds the app looks for new website
+  booking requests and questions. New ones pop up with a chime: name, number, day and time asked, services or the
+  question. **Seen** closes it; **Open requests / enquiries** goes to Bookings on that tab. Each device remembers what
+  it has shown (the first time on a device, nothing old pops up). Not in the demo.
+
+### Files
+- `supabase/01_schema.sql` (end): `enquiries.call_time`, `calls`, `last_call_at`, `last_call_note`.
+- `src/lib/bookings.js` (`CALL_TIMES`, `callList`, `callOutcome`), `src/lib/alerts.js` (`newWebsiteItems`),
+  `src/components/Alerts.jsx` (`WebsitePopup`, chime), `src/pages/Appointments.jsx` (Call enquiry, Call back tab,
+  `CallCard`, the enquiry form fields, `startTab`), `src/App.jsx`, `src/lib/localdb.js` (demo), tests in
+  `tests/whatsapp.test.mjs`.
+
+### To make it work
+Supabase SQL Editor: run `supabase/01_schema.sql` again **before** using Call enquiry (the new columns). Settings
+stay 45. Push `test`; reload the app on the tablet.
+
+---
 ## 7. Bill template made plainly "Utility" (and a WhatsApp booking bot, tried and dropped)
 
 **Branch:** `test` · **Date:** 12–13 Nov 2026

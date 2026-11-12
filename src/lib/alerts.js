@@ -20,6 +20,19 @@ export function failedBills(rows, { now = Date.now(), dismissed = [] } = {}) {
     .map((r) => ({ id: r.id, bill_id: r.bill_id, phone: r.phone, error: r.error, at: r.updated_at || r.created_at }));
 }
 
+// New from the website (booking requests and questions) that this device hasn't shown yet: the popup.
+//   bookings / enquiries: rows of the last day; seen: ids already shown. Returns [{ kind, id, row }], oldest first.
+//   First time on a device (seen = null): nothing pops up; what is there now counts as seen.
+export function newWebsiteItems({ bookings = [], enquiries = [] }, seen) {
+  const all = [
+    ...bookings.filter((b) => b.source === 'website' && b.status === 'requested').map((row) => ({ kind: 'booking', id: row.id, row })),
+    ...enquiries.filter((e) => e.source === 'website' && e.status === 'new').map((row) => ({ kind: 'enquiry', id: row.id, row })),
+  ].sort((a, b) => (String(a.row.created_at) < String(b.row.created_at) ? -1 : 1));
+  if (!seen) return [];
+  const s = new Set(seen);
+  return all.filter((x) => !s.has(x.id));
+}
+
 const dayText = (ts) => new Date(ts).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: '2-digit', month: 'short' });
 
 // What the backup bar says, or null (nothing to do). b: backup_status() from the database.

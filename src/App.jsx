@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ReceiptText, ListOrdered, Users, UserCog, Package, BarChart3, Settings as Cog, Lock, Unlock, CloudUpload, RefreshCw, ShieldCheck, CalendarDays, SunMoon } from 'lucide-react';
 import { DisplayModal } from './components/DisplayModal';
-import { AlertBars } from './components/Alerts';
+import { AlertBars, WebsitePopup } from './components/Alerts';
 import { db, getDb, IS_DEMO, subscribeSync, uploadNow, loginApi, ownerApi } from './lib/db';
 import { waAutoOn } from './lib/waAuto';
 import { deviceName, LoginList } from './components/Logins';
@@ -210,6 +210,7 @@ function Shell({ onSignOut }) {
   const waitingTotal = waiting.logins + waiting.owner;
   // New booking requests (website, Instagram) and enquiries waiting: a number on Appointments
   const [appts, setAppts] = useState(0);
+  const [apptTab, setApptTab] = useState({ tab: '', n: 0 });   // the website popup opens Bookings on Requests or Enquiries
   // Leave waiting for the owner: a number on Staff
   const [staffWait, setStaffWait] = useState(0);
   useEffect(() => {
@@ -336,9 +337,10 @@ function Shell({ onSignOut }) {
         </div>
       )}
       {online && <AlertBars onOpenBills={() => go('bills')} />}
+      {!IS_DEMO && <WebsitePopup onOpen={(tab) => { setApptTab((x) => ({ tab, n: x.n + 1 })); go('appts'); }} />}
       <main className="main">
         {page === 'bill' && <Billing hasBanner={banner} />}
-        {page === 'appts' && <Appointments onOpenBill={() => go('bill')} onCounts={setAppts} />}
+        {page === 'appts' && <Appointments key={apptTab.n} startTab={apptTab.tab || undefined} onOpenBill={() => go('bill')} onCounts={setAppts} />}
         {page === 'bills' && <Bills onOpenBill={() => go('bill')} />}
         {page === 'customers' && <Customers />}
         {page === 'staff' && <Staff onCounts={(c) => setStaffWait(c.leave)} />}
