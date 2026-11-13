@@ -397,7 +397,15 @@ able to allow it (e.g. Chhath Puja) by approving it.
   `db.…supabase.co` address doesn't work from GitHub, and a password with `@` has to be written `%40`).
 - Local `.env` points at the Test project (never committed).
 
+- **WhatsApp bills work on Test (13 Nov 2026)** with Meta's test number (+1 555-138-7931, Phone ID in the secret
+  `WHATSAPP_PHONE_ID`). Template **`habibs_bill_receipt`** (Utility, language English = `en`), so the secret
+  `WHATSAPP_TEMPLATE` = `habibs_bill_receipt` and no `WHATSAPP_TEMPLATE_LANG`. System user `habibs-pos` holds the
+  permanent token. The test number only sends to numbers on its allowed list (Meta app → API Setup → To).
+
 ### Still to do
+- **Real WhatsApp number**: a new SIM, Meta business verification, add the number (a new WhatsApp account: assign it
+  to the system user, create the same template there), then change `WHATSAPP_PHONE_ID`; publish the Meta app
+  (needs a privacy policy link).
 - Set up the **Live** Supabase project `habibs` (schema, users, second Telegram bot), then switch Cloudflare's
   Production variables to it and point the backup secret at it.
 - Merge `test` → `main` after checking the changes above on the tablet.
