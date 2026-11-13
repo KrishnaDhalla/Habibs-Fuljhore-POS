@@ -684,8 +684,12 @@ export default function Billing({ hasBanner }) {
                   <div className="cust-suggest" role="listbox" aria-label="Saved customers">
                     {suggest.map((c) => (
                       <button key={c.id || c.phone} role="option" onClick={() => { setPhone(c.phone); setSuggest([]); }}>
-                        <span className="strong">{c.name || 'No name'}</span>
-                        <span className="muted">{fmtPhone(c.phone)} · {c.visits || 0} {Number(c.visits) === 1 ? 'visit' : 'visits'}</span>
+                        <span className="avatar" aria-hidden="true">{(c.name || '?').trim().charAt(0).toUpperCase() || '?'}</span>
+                        <span className="who">
+                          <span className="strong">{c.name || 'No name'}</span>
+                          <span className="muted">{fmtPhone(c.phone)} · {c.visits || 0} {Number(c.visits) === 1 ? 'visit' : 'visits'}</span>
+                        </span>
+                        <span className="pick">Select</span>
                       </button>
                     ))}
                   </div>
@@ -713,16 +717,17 @@ export default function Billing({ hasBanner }) {
                 {lookup === 'invalid' && <span className="err-text">A mobile number starts with 6, 7, 8 or 9.</span>}
                 {lookup === 'loading' && <span className="muted small">Looking up…</span>}
                 {lookup === 'found' && cust && (
-                  <div className="cust-card">
+                  <div className={'cust-card found' + (cust.visits >= 3 ? ' regular' : '')} id="cust-found">
                     <div className="row between top">
                       <div className="grow">
                         <input className="input" id="cust-name" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Customer name" aria-label="Customer name" />
                       </div>
                       <span className={'pill ' + (cust.visits >= 3 ? 'red' : 'ok')}>{cust.visits >= 3 ? 'Regular' : 'Returning'}</span>
                     </div>
-                    <div className="small muted">
-                      {cust.visits} {cust.visits === 1 ? 'visit' : 'visits'} · spent {rupee(cust.total_spent)}
-                      {cust.last_visit ? ` · last came ${daysSince(cust.last_visit) === 0 ? 'today' : fmtDate(cust.last_visit)}` : ''}
+                    <div className="cust-facts">
+                      <span><b>{cust.visits}</b> {cust.visits === 1 ? 'visit' : 'visits'}</span>
+                      <span>spent <b>{rupee(cust.total_spent)}</b></span>
+                      {cust.last_visit && <span>last came <b>{daysSince(cust.last_visit) === 0 ? 'today' : fmtDate(cust.last_visit)}</b></span>}
                     </div>
                     {rules.on && !staffNumber && (Number(cust.points) > 0 || balance !== 0) && (
                       <div className="small points-line" id="cust-points">
@@ -1128,8 +1133,12 @@ function FindCustomer({ onPick, onClose }) {
           <div className="cust-suggest">
             {rows.map((c) => (
               <button key={c.id || c.phone} onClick={() => onPick(c)}>
-                <span className="strong">{c.name || 'No name'}</span>
-                <span className="muted">{fmtPhone(c.phone)} · {c.visits || 0} {Number(c.visits) === 1 ? 'visit' : 'visits'}{c.last_visit ? ' · last ' + fmtDate(c.last_visit) : ''}</span>
+                <span className="avatar" aria-hidden="true">{(c.name || '?').trim().charAt(0).toUpperCase() || '?'}</span>
+                <span className="who">
+                  <span className="strong">{c.name || 'No name'}</span>
+                  <span className="muted">{fmtPhone(c.phone)} · {c.visits || 0} {Number(c.visits) === 1 ? 'visit' : 'visits'}{c.last_visit ? ' · last ' + fmtDate(c.last_visit) : ''}</span>
+                </span>
+                <span className="pick">Select</span>
               </button>
             ))}
           </div>

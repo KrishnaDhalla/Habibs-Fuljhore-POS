@@ -845,3 +845,72 @@ html, body { overscroll-behavior: none; }               /* no accidental pull-to
 .fb-card { display: grid; gap: 6px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
 .fb-card:last-child { border-bottom: 0; }
 .fb-card.bad { background: var(--bad-bg); }
+
+/* =====================================================================
+   Polish (13 Nov 2026): softer corners, clearer focus and press, quicker motion, a customer box that is noticed,
+   password dots that can be seen. Only colours, borders, shadows, transform and opacity: nothing that makes a
+   budget tablet work harder.
+   ===================================================================== */
+:root { --r: 6px; --ring: rgba(139, 30, 37, .16); --shadow-1: 0 1px 2px rgba(43, 43, 43, .05); --shadow-2: 0 6px 18px rgba(43, 43, 43, .08); }
+:root[data-theme="dark"] { --ring: rgba(255, 158, 146, .28); --shadow-1: none; --shadow-2: 0 6px 18px rgba(0, 0, 0, .35); }
+
+/* quicker, so a tap feels answered at once */
+.btn, .chip, .tile, .icon-btn, .seg button, .pay-modes button, .variant-grid button, .pin-pad button,
+.nav button, .tabs button, .cart-line select, .input, .select, .textarea, .link, .cust-suggest button {
+  transition: background-color .12s ease, border-color .12s ease, color .12s ease, box-shadow .12s ease, transform .1s var(--ease-out), opacity .12s ease;
+}
+.page { animation-duration: .18s; }
+.modal { animation-duration: .2s; border-radius: 10px; }
+.cart-line { animation-duration: .18s; }
+.toast { border-radius: 8px; }
+
+/* focus: a soft ring, easy to find on a bright counter */
+.input:focus, .select:focus, .textarea:focus { border-color: var(--red); box-shadow: 0 0 0 3px var(--ring); }
+.input.err { box-shadow: 0 0 0 3px rgba(179, 38, 30, .12); }
+
+/* press: every tappable thing answers the finger */
+.tile { box-shadow: var(--shadow-1); }
+.tile:active { background: var(--blush); border-color: var(--red); }
+.chip:active, .pay-modes button:active, .variant-grid button:active, .seg button:not(.on):active { background: var(--sand); }
+.btn.primary { box-shadow: 0 1px 2px rgba(111, 22, 28, .25); }
+.btn.primary:active:not(:disabled) { background: var(--fill-red-hover); }
+.btn.line:active:not(:disabled), .icon-btn:active { background: var(--sand); }
+.nav button:active, .tabs button:active { color: var(--ink); }
+.card, .stat { box-shadow: var(--shadow-1); }
+.stat.accent { box-shadow: none; }
+.pill { height: 24px; padding: 0 10px; }
+
+/* ---- Login: dots that can be seen, and an eye to show what was typed ---- */
+.pass-wrap > .input { padding-left: 12px; padding-right: 50px; }
+.pass-wrap > .clear { right: 4px; }
+.input.pass-dots { font-family: Verdana, 'Segoe UI', Arial, sans-serif; font-size: 26px; font-weight: 700; letter-spacing: .14em; }
+.login .card { box-shadow: var(--shadow-2); border-radius: 12px; }
+.login .input { height: 52px; }
+
+/* ---- Billing: the saved customer is noticed ---- */
+.cust-suggest { border: 1.5px solid var(--red); border-radius: 8px; box-shadow: var(--shadow-2); animation: dropIn .16s var(--ease-out) both; }
+.cust-suggest button { flex-direction: row; align-items: center; gap: 12px; padding: 10px 12px; min-height: 60px; background: var(--panel); }
+.cust-suggest button:active, .cust-suggest button:hover { background: var(--blush); }
+.cust-suggest .avatar, .cust-card.found .avatar {
+  flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--fill-red); color: var(--on-fill); font-weight: 600; font-size: 16px;
+}
+.cust-suggest .who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; text-align: left; }
+.cust-suggest .who .strong { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cust-suggest .pick { flex: none; font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--red); border: 1px solid var(--red); border-radius: 99px; padding: 5px 11px; }
+.cust-card.found {
+  background: var(--ok-bg); border: 1.5px solid var(--ok); border-left-width: 5px; border-radius: 8px;
+  animation: dropIn .2s var(--ease-out) both;
+}
+.cust-card.found.regular { background: var(--blush); border-color: var(--red); }
+.cust-card.found .input { font-size: 17px; font-weight: 600; background: var(--panel); }
+.cust-card.found .pill { height: 26px; font-size: 12.5px; font-weight: 600; background: var(--panel); border: 1px solid currentColor; }
+.cust-facts { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; color: var(--ink); }
+.cust-facts span { background: var(--panel); border: 1px solid var(--line); border-radius: 99px; padding: 3px 10px; white-space: nowrap; }
+.cust-facts b { font-weight: 600; }
+@keyframes dropIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+@media (hover: none) {
+  .cust-suggest button:hover { background: var(--panel); }
+  .cust-suggest button:active { background: var(--blush); }
+}

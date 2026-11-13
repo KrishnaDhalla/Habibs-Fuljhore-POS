@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ReceiptText, ListOrdered, Users, UserCog, Package, BarChart3, Settings as Cog, Lock, Unlock, CloudUpload, RefreshCw, ShieldCheck, CalendarDays, SunMoon } from 'lucide-react';
+import { ReceiptText, ListOrdered, Users, UserCog, Package, BarChart3, Settings as Cog, Lock, Unlock, CloudUpload, RefreshCw, ShieldCheck, CalendarDays, SunMoon, Eye, EyeOff } from 'lucide-react';
 import { DisplayModal } from './components/DisplayModal';
 import { AlertBars, WebsitePopup } from './components/Alerts';
 import { db, getDb, IS_DEMO, subscribeSync, uploadNow, loginApi, ownerApi } from './lib/db';
@@ -155,6 +155,7 @@ function LoginGate({ session, onSignOut, children }) {
 function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [show, setShow] = useState(false);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = async (e) => {
@@ -174,7 +175,15 @@ function Login() {
       <form className="card stack loose" onSubmit={submit}>
         <div className="brand" style={{ alignItems: 'center' }}><b>HABIBS</b><span>Fuljhore · Billing</span></div>
         <Field label="Email"><input className="input" id="login-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
-        <Field label="Password"><input className="input" id="login-pass" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
+        <Field label="Password">
+          <div className="input-wrap pass-wrap">
+            <input className={'input' + (show ? '' : ' pass-dots')} id="login-pass" type={show ? 'text' : 'password'} autoComplete="current-password" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+              value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <button type="button" className="icon-btn plain clear" id="login-show" aria-label={show ? 'Hide the password' : 'Show the password'} aria-pressed={show} onClick={() => setShow((x) => !x)}>
+              {show ? <EyeOff size={19} /> : <Eye size={19} />}
+            </button>
+          </div>
+        </Field>
         {err && <p className="err-text">{err}</p>}
         <button className="btn primary block lg" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
       </form>
