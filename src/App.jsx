@@ -132,7 +132,7 @@ function LoginGate({ session, onSignOut, children }) {
   return (
     <div className="login">
       <div className="card stack loose" style={{ textAlign: 'center' }}>
-        <div className="brand" style={{ alignItems: 'center' }}><b>HABIBS</b><span>Fuljhore · Billing</span></div>
+        <div className="brand login-brand"><img src="/logo.png" alt="Habibs Hair &amp; Beauty, Durgapur Fuljhore" width="310" height="149" /><span>Billing</span></div>
         <ShieldCheck size={34} style={{ margin: '0 auto', color: st === 'denied' ? 'var(--bad)' : 'var(--red)' }} />
         <h2 style={{ fontSize: 20 }}>{title}</h2>
         <p className="muted">{text}</p>
@@ -173,7 +173,7 @@ function Login() {
   return (
     <div className="login">
       <form className="card stack loose" onSubmit={submit}>
-        <div className="brand" style={{ alignItems: 'center' }}><b>HABIBS</b><span>Fuljhore · Billing</span></div>
+        <div className="brand login-brand"><img src="/logo.png" alt="Habibs Hair &amp; Beauty, Durgapur Fuljhore" width="310" height="149" /><span>Billing</span></div>
         <Field label="Email"><input className="input" id="login-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
         <Field label="Password">
           <div className="input-wrap pass-wrap">
@@ -301,7 +301,7 @@ function Shell({ onSignOut }) {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand"><b>HABIBS</b><span>{(settings.branch || 'Fuljhore').split(',')[0]} · Billing</span></div>
+        <div className="brand"><img src="/logo-mark.png" alt="Habibs Hair &amp; Beauty" width="306" height="108" /><span>{(settings.branch || 'Fuljhore').split(',')[0]} · Billing</span></div>
         <nav className="nav" aria-label="Main">
           {PAGES.map(([key, label, Icon, ownerOnly]) => (
             <button key={key} className={page === key ? 'on' : ''} aria-current={page === key ? 'page' : undefined} onClick={() => go(key, ownerOnly)}>

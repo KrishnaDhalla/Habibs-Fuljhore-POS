@@ -914,3 +914,13 @@ html, body { overscroll-behavior: none; }               /* no accidental pull-to
   .cust-suggest button:hover { background: var(--panel); }
   .cust-suggest button:active { background: var(--blush); }
 }
+
+/* ---- The salon's logo (public/logo-mark.png in the top bar, public/logo.png on the login screen) ---- */
+.brand img { display: block; height: 34px; width: auto; }
+.brand img + span { margin-top: 3px; font-size: 9px; letter-spacing: .2em; text-align: center; }
+.login-brand { align-items: center; }
+.login-brand img { height: auto; width: 230px; max-width: 80%; }
+.login-brand img + span { margin-top: 6px; font-size: 11px; letter-spacing: .28em; }
+/* the logo is dark red: on the dark screen it sits on a light plate so it stays readable */
+:root[data-theme="dark"] .brand img { background: #F6F1EC; border-radius: 6px; padding: 3px 6px; box-sizing: content-box; }
+@media (max-width: 700px) { .brand img { height: 28px; } .brand img + span { display: none; } }
