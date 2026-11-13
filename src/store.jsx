@@ -78,7 +78,7 @@ export function AppProvider({ children, user, role = 'owner' }) {
   //   fresh: ask even while the owner screens are unlocked, unless the owner is here (owner login, or unlocked with the code).
   //   Used for price and menu changes, so the owner sees every one of them.
   //   codeOnly: only the owner in person: an owner login, or the owner's code here (no Telegram). Adding services and
-  //   categories, and past bills.
+  //   categories. (Past bills too until 13 Nov 2026: now Telegram is enough for them.)
   const ownerHere = unlock.until > Date.now() && (unlock.method === 'owner' || unlock.method === 'code');
   const askOwner = useCallback(
     (reason, opts = {}) => {

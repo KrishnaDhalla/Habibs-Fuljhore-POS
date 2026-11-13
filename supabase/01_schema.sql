@@ -891,11 +891,12 @@ begin
   -- Every figure must add up, or nothing is saved
   perform check_bill(p);
 
-  -- A past bill: only the owner (owner login, or the owner's code at the counter), with a date and time before now,
+  -- A past bill: only the owner (owner login, the owner's code at the counter, or owner screens unlocked on Telegram:
+  -- the owner chose that on 13 Nov 2026), with a date and time before now,
   -- within the last 400 days, online, without points. It gets a note saying when and by whom it was typed in.
   if v_past then
-    if not owner_here() then
-      raise exception 'Only the owner can add a past bill: sign in as the owner, or the owner types the code';
+    if not owner_ok() then
+      raise exception 'Only the owner can add a past bill: ask the owner on Telegram, or the owner types the code';
     end if;
     if nullif(p->>'created_at', '') is null then raise exception 'Past bill: choose the day and time of the bill'; end if;
     if v_at > now() then raise exception 'Past bill: the day and time must be before now'; end if;
@@ -1346,7 +1347,7 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- The owner is here: an owner login, or the owner typed the Authenticator code at the counter
--- (an unlock approved on Telegram is not enough). Adding services and categories, and past bills, need this.
+-- (an unlock approved on Telegram is not enough). Adding services and categories need this.
 create or replace function owner_here() returns boolean
 language sql stable security definer set search_path = public as $$
   select direct_session() or is_owner() or exists (

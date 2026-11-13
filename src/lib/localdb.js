@@ -241,6 +241,11 @@ export function createLocalDb() {
     const now = new Date().toISOString();
     return T('owner_grants').some((x) => x.action === 'unlock' && x.method === 'code' && x.status === 'approved' && x.expires_at > now);
   }
+  // Same as owner_ok() in the database: owner screens are unlocked (the code, or approved on Telegram)
+  function ownerUnlocked() {
+    const now = new Date().toISOString();
+    return T('owner_grants').some((x) => x.action === 'unlock' && x.status === 'approved' && x.expires_at > now);
+  }
   // Same rule as menu_change_grant(): the owner's code unlock is on, or a one-time approval of exactly this change
   function menuGrant(grantId, ref) {
     const now = new Date().toISOString();
@@ -443,7 +448,7 @@ export function createLocalDb() {
     // A past bill (owner only): its own day and time and number series, like create_bill() in the database
     const past = !!p.past;
     if (past) {
-      if (!ownerHere()) throw new Error('Only the owner can add a past bill: sign in as the owner, or the owner types the code');
+      if (!ownerUnlocked()) throw new Error('Only the owner can add a past bill: ask the owner on Telegram, or the owner types the code');
       if (!p.created_at) throw new Error('Past bill: choose the day and time of the bill');
       if (new Date(when).getTime() > Date.now()) throw new Error('Past bill: the day and time must be before now');
       if (new Date(when).getTime() < Date.now() - 400 * 86400000) throw new Error('Past bill: that is more than 400 days ago');

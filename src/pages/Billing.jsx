@@ -110,7 +110,7 @@ const MenuTiles = memo(function MenuTiles({ shown, inCart, q, onService, onProdu
 });
 
 export default function Billing({ hasBanner }) {
-  const { services, staff, products, offers, settings, gstOn, toast, askOwner, ownerHere, loadProducts, user } = useApp();
+  const { services, staff, products, offers, settings, gstOn, toast, askOwner, isOwner, loadProducts, user } = useApp();
   const draft = useRef(loadDraft()).current;
 
   const [q, setQ] = useState('');
@@ -447,7 +447,7 @@ export default function Billing({ hasBanner }) {
   };
   // Start a past bill: the owner only, here at the counter
   const startPast = async () => {
-    if (!(await askOwner('Only the owner can add a past bill.', { codeOnly: true, detail: 'Add a past bill' }))) return;
+    if (!(await askOwner('Only the owner can add a past bill.', { detail: 'Add a past bill' }))) return;
     const y = new Date(Date.now() + 5.5 * 3600e3 - 86400e3).toISOString().slice(0, 10);
     setPast({ date: y, time: '', paper: '' });
     setPtsOn(false);
@@ -479,7 +479,7 @@ export default function Billing({ hasBanner }) {
     // Above the limit: the owner approves this discount (Telegram), or unlocks with the code
     let grantId = '';
     // A past bill is the owner's own: the owner is here (checked again when it is saved)
-    if (past && !(await askOwner('Only the owner can add a past bill.', { codeOnly: true, detail: 'Add a past bill' }))) return;
+    if (past && !(await askOwner('Only the owner can add a past bill.', { detail: 'Add a past bill' }))) return;
     if (!past && bill.discountPct > maxDisc + 0.001) {
       const ok0 = approvedDisc.current;
       if (ok0 && ok0.billId === billId.current && bill.manualDiscount <= ok0.amount) {
@@ -604,7 +604,7 @@ export default function Billing({ hasBanner }) {
             <span className="row" style={{ gap: 6, marginLeft: 'auto' }}>
               {!past && (
                 <button className="btn ghost sm" id="past-start" onClick={startPast} title="Type in a bill from before (owner only)">
-                  <History size={14} /> Past bill{!ownerHere && <Lock size={11} />}
+                  <History size={14} /> Past bill{!isOwner && <Lock size={11} />}
                 </button>
               )}
               {(lines.length > 0 || phone || past) && (

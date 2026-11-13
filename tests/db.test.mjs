@@ -983,7 +983,10 @@ for (const [t, want] of fyCases) {
   check('counter: a past bill is refused', /Only the owner can add a past bill/.test((await save('clerk', pastOf([S(cut, 600)]))).error || ''));
   const tg = randomUUID();
   await q(`insert into owner_grants (id, session_id, user_id, action, method, status, expires_at) values ($1, $2, $3, 'unlock', 'telegram', 'approved', now() + interval '10 minutes')`, [tg, sClerk, clerk]);
-  check('…also with owner screens unlocked on Telegram (the owner must be here)', /Only the owner can add a past bill/.test((await save('clerk', pastOf([S(cut, 600)]))).error || ''));
+  // owner screens unlocked on Telegram are enough (the owner's choice, 13 Nov 2026): the bill gets past the owner check
+  // and is judged on its own (here: a time in the future is refused, so nothing is saved)
+  check('…with owner screens unlocked on Telegram it is allowed (then checked like any past bill)',
+    /must be before now/.test((await save('clerk', pastOf([S(cut, 600)], { created_at: new Date(Date.now() + 3600e3).toISOString() }))).error || ''));
   await q(`update owner_grants set expires_at = now() where id = $1`, [tg]);
   const code = randomUUID();
   await q(`insert into owner_grants (id, session_id, user_id, action, method, status, expires_at) values ($1, $2, $3, 'unlock', 'code', 'approved', now() + interval '10 minutes')`, [code, sClerk, clerk]);

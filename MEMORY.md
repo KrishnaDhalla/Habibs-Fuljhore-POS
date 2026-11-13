@@ -9,6 +9,21 @@ done in Supabase for it to work. Keep this file up to date when something change
 
 ---
 
+## 10. Past bills: a Telegram approval is enough (13 Nov 2026)
+
+**Branch:** `test`. The owner asked for it. Before, **Past bill** needed the owner in person (owner login or the
+Authenticator code); with no code set up there was no way in. Now the usual owner unlock works: **Ask the owner on
+Telegram** (opens owner screens for 10 minutes) or the code. Adding a service or a category still needs the owner
+in person.
+- `supabase/01_schema.sql`: `create_bill()` checks `owner_ok()` for a past bill (was `owner_here()`).
+- `src/pages/Billing.jsx` (no `codeOnly`), `src/lib/localdb.js` (`ownerUnlocked()`), `tests/db.test.mjs`, README.
+- **To make it work:** run `supabase/01_schema.sql` again on the project (Test, and Live when it is set up).
+- Also on 13 Nov: the login password shows big dots with a show/hide eye; the saved-customer suggestions and the
+  found-customer box on New bill stand out; softer corners, focus ring, quicker motion (`src/styles.css`, end);
+  the salon's logo in the top bar and on the login screen (`public/logo-mark.png`, `public/logo.png`, compressed);
+  the Owner approval window no longer flashes the keypad while it checks whether a code is set up.
+
+---
 ## 9. Full test pass (13 Nov 2026) and two fixes from it
 
 **Branch:** `test` · **Date:** 13 Nov 2026
