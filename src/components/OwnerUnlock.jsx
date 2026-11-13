@@ -17,14 +17,22 @@ export function OwnerUnlock({ ask, onApproved, onClose }) {
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const [codes, setCodes] = useState(null); // how many owners set up Authenticator (null = unknown)
+  // How many owners set up Authenticator: undefined = still asking, null = couldn't ask (the keypad shows, in case).
+  // What was found last time is remembered on the device, so the keypad doesn't flash and go when none is set up.
+  const [codes, setCodes] = useState(() => {
+    try { const v = localStorage.getItem('pos-totp-owners'); return v === null ? undefined : Number(v) || 0; } catch { return undefined; }
+  });
   const [resetKey, setResetKey] = useState(0);
   const done = useRef(false);
   const action = ask.action || 'unlock';
   const detail = ask.detail || (action === 'unlock' ? 'Open owner screens' : '');
 
   useEffect(() => {
-    ownerApi.totpStatus().then((s) => setCodes(s ? Number(s.owners) || 0 : 0)).catch(() => setCodes(null));
+    ownerApi.totpStatus().then((s) => {
+      const n = s ? Number(s.owners) || 0 : 0;
+      setCodes(n);
+      try { localStorage.setItem('pos-totp-owners', String(n)); } catch { /* not kept */ }
+    }).catch(() => setCodes((c) => (c === undefined ? null : c)));
   }, []);
 
   const approved = (g) => {
@@ -108,7 +116,9 @@ export function OwnerUnlock({ ask, onApproved, onClose }) {
 
         {!ask.codeOnly && <div className="or-line"><span>or, if the owner is here</span></div>}
 
-        {codes === 0 && !IS_DEMO ? (
+        {codes === undefined && !IS_DEMO ? (
+          <p className="small muted" style={{ textAlign: 'center' }} id="owner-code-checking">Checking the code set-up…</p>
+        ) : codes === 0 && !IS_DEMO ? (
           <p className="small muted" style={{ textAlign: 'center' }}>
             The code isn't set up yet. The owner sets it up once in Settings → Owner unlock, on their own phone.
           </p>
